@@ -131,21 +131,21 @@ def test_enforce_result_not_in_given_test_is_refused(mock_api):
 
 @pytest.mark.parametrize(("suite_project", "allowed"), [(1, True), (3, False)])
 def test_enforce_case_project_via_suite(mock_api, suite_project, allowed):
-    mock_api.get(API + "get_case/7196").mock(
+    mock_api.get(API + "get_case/1234").mock(
         return_value=httpx.Response(
-            200, json={"id": 7196, "suite_id": 72, "section_id": 5, "title": "t"}
+            200, json={"id": 1234, "suite_id": 3, "section_id": 5, "title": "t"}
         )
     )
-    mock_api.get(API + "get_suite/72").mock(
-        return_value=httpx.Response(200, json={"id": 72, "project_id": suite_project})
+    mock_api.get(API + "get_suite/3").mock(
+        return_value=httpx.Response(200, json={"id": 3, "project_id": suite_project})
     )
     cfg = make_config(allowed_project_ids=frozenset({1}))
     client = TestRailClient(cfg, sleep=_no_sleep)
     if allowed:
-        run(enforce_write_scope(client, cfg, case_id=7196))
+        run(enforce_write_scope(client, cfg, case_id=1234))
     else:
         with pytest.raises(TestRailError, match="Project 3 is outside"):
-            run(enforce_write_scope(client, cfg, case_id=7196))
+            run(enforce_write_scope(client, cfg, case_id=1234))
 
 
 def test_tool_attach_to_result_created_in_session(mock_api, statuses, tmp_path):

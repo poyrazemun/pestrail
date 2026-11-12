@@ -53,6 +53,21 @@ Files are read from the machine running pestrail. pestrail:
 | TestRail response size | 20 MB (refused while streaming, never fully loaded) |
 | Rate limiting (HTTP 429) | Follows `Retry-After`: up to 3 retries and 30 s in total. A longer requested wait fails right away and says how long. |
 
+## Known limitations
+
+These follow from the design and are worth knowing before you enable writes:
+
+- **Prompt injection is reduced, not removed.** Text stored in TestRail (case titles, steps,
+  comments) reaches the assistant and can try to steer it. pestrail guarantees the assistant
+  can't delete, edit or close anything, or write outside your allowlists and attachment
+  roots. It can't stop a wrong result being added *inside* what you allowed. Keep your MCP
+  client's approval prompts on for write tools.
+- **Read tools expose what the TestRail user can see** to the assistant, including user
+  names and email addresses. Limit the user's project access accordingly.
+- **Added results and attachments can't be removed through pestrail.** Remove mistakes in
+  TestRail itself.
+- **Uploads are read fully into memory** (up to 256 MB per file) before sending.
+
 ## Recommended TestRail setup
 
 - Use a dedicated TestRail user whose role can only view and add results, limited to the
