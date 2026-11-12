@@ -449,6 +449,25 @@ def test_bulk_results_validated_before_sending(mock_api, statuses):
     assert route.call_count == 0
 
 
+def test_bulk_results_rejects_length_mismatch(mock_api, statuses):
+    mock_api.post(API + "add_results_for_cases/56").mock(
+        return_value=httpx.Response(200, json=[{"id": 1, "test_id": 11, "status_id": 1}])
+    )
+    with pytest.raises(ToolError, match="returned 1 results but 2 were sent"):
+        asyncio.run(
+            build().call_tool(
+                "add_results_for_cases",
+                {
+                    "run_id": 56,
+                    "results": [
+                        {"case_id": 1, "status": "passed"},
+                        {"case_id": 2, "status": "failed"},
+                    ],
+                },
+            )
+        )
+
+
 # ----------------------------------------------------------------- attachments
 
 
@@ -569,6 +588,30 @@ def test_result_with_attachments_bad_file_creates_nothing(mock_api, statuses, tm
             )
         )
     assert route.call_count == 0
+
+
+def test_result_with_attachments_missing_result_id(mock_api, statuses, tmp_path):
+    f = tmp_path / "a.log"
+    f.write_text("a", encoding="utf-8")
+    mock_api.post(API + "add_result_for_case/56/1").mock(
+        return_value=httpx.Response(200, json={"test_id": 9, "status_id": 1})
+    )
+    upload = mock_api.post(url__startswith=API + "add_attachment").mock(
+        return_value=httpx.Response(200, json={"attachment_id": 1})
+    )
+    with pytest.raises(ToolError, match="no usable result id"):
+        asyncio.run(
+            build().call_tool(
+                "add_result_with_attachments",
+                {
+                    "run_id": 56,
+                    "case_id": 1,
+                    "status": 1,
+                    "file_paths": [str(f)],
+                },
+            )
+        )
+    assert upload.call_count == 0
 
 
 # ----------------------------------------------------------------- secrecy

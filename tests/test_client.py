@@ -539,6 +539,25 @@ def test_statuses_are_cached(client, mock_api):
     assert route.call_count == 1
 
 
+def test_statuses_cache_expires(client, mock_api):
+    route = mock_api.get(API + "get_statuses").mock(
+        return_value=httpx.Response(200, json=[{"id": 1, "name": "passed"}])
+    )
+    run(client.get_statuses())
+    client._status_cache_at -= client._status_ttl + 1
+    run(client.get_statuses())
+    assert route.call_count == 2
+
+
+def test_response_body_too_large(client, mock_api):
+    from pestrail.client import MAX_RESPONSE_BYTES
+
+    huge = b"{" + b'"x":"' + (b"y" * (MAX_RESPONSE_BYTES + 10)) + b'"}'
+    mock_api.get(API + "get_projects").mock(return_value=httpx.Response(200, content=huge))
+    with pytest.raises(TestRailError, match="too large"):
+        run(client.get("get_projects"))
+
+
 # ----------------------------------------------------------------- secrecy
 
 

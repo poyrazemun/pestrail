@@ -97,6 +97,10 @@ MAX_TOTAL_RETRY_WAIT = 30.0
 DEFAULT_RETRY_DELAY = 5.0
 #: Safety cap for helpers that walk through all pages.
 DEFAULT_MAX_ITEMS = 1000
+#: How long get_statuses() may reuse a cached list before refetching.
+STATUS_CACHE_TTL = 300.0
+#: Refuse to parse JSON bodies larger than this (protects memory / MCP context).
+MAX_RESPONSE_BYTES = 20 * 1024 * 1024
 
 PathArg = int | str
 Params = Mapping[str, Any]
@@ -168,12 +172,11 @@ def build_ssl_context(config: Config) -> ssl.SSLContext:
         return ssl.create_default_context(cafile=str(config.ca_bundle))
     try:
         import truststore
-
-        return truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-    except Exception:  # pragma: no cover - truststore unavailable on this platform
+    except ImportError:  # pragma: no cover - truststore not installed
         import certifi
 
         return ssl.create_default_context(cafile=certifi.where())
+    return truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
 
 
 _MAX_ERROR_DETAIL = 300
@@ -254,6 +257,8 @@ class TestRailClient:
             transport=transport,
         )
         self._status_cache: list[dict[str, Any]] | None = None
+        self._status_cache_at: float = 0.0
+        self._status_ttl = STATUS_CACHE_TTL
 
     def __repr__(self) -> str:
         return f"TestRailClient(url={self._config.url!r}, read_only={self._config.read_only})"
@@ -320,15 +325,20 @@ class TestRailClient:
 
         attempt = 0
         waited = 0.0
+        upload_parts: tuple[str, bytes] | None = None
+        if file_path is not None:
+            # Read off the event loop so large/slow disks do not stall other tool calls.
+            data = await asyncio.to_thread(file_path.read_bytes)
+            upload_parts = (file_path.name, data)
         while True:
             try:
-                if file_path is not None:
-                    with file_path.open("rb") as fh:
-                        response = await self._http.post(
-                            url,
-                            files={"attachment": (file_path.name, fh)},
-                            timeout=self._upload_timeout,
-                        )
+                if upload_parts is not None:
+                    name, data = upload_parts
+                    response = await self._http.post(
+                        url,
+                        files={"attachment": (name, data)},
+                        timeout=self._upload_timeout,
+                    )
                 elif http_method == "POST":
                     response = await self._http.post(
                         url,
@@ -376,8 +386,15 @@ class TestRailClient:
     @staticmethod
     def _handle_response(method: str, response: httpx.Response) -> Any:
         status = response.status_code
+        content = response.content
+        if len(content) > MAX_RESPONSE_BYTES:
+            raise TestRailError(
+                f"TestRail response for {method} is too large ({len(content)} bytes; "
+                f"limit {MAX_RESPONSE_BYTES}). Narrow filters or lower max_items.",
+                status,
+            )
         if 200 <= status < 300:
-            if not response.content:
+            if not content:
                 return None
             try:
                 return response.json()
@@ -475,8 +492,10 @@ class TestRailClient:
             offset += len(items)
 
     async def get_statuses(self, *, refresh: bool = False) -> list[dict[str, Any]]:
-        """Return result statuses, cached for the lifetime of the client."""
-        if self._status_cache is None or refresh:
+        """Return result statuses, cached briefly then refreshed."""
+        aged = (time.monotonic() - self._status_cache_at) > self._status_ttl
+        if self._status_cache is None or refresh or aged:
             data = await self.get("get_statuses")
             self._status_cache = list(data or [])
+            self._status_cache_at = time.monotonic()
         return self._status_cache

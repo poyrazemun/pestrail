@@ -96,24 +96,33 @@ FIELD_TYPES = {
 }
 
 
+#: Reject timestamps beyond ~2100-01-01 UTC (and negatives).
+_MAX_TIMESTAMP = 4_102_444_800
+
+
 def to_timestamp(value: int | str | None) -> int | None:
     """Accept unix seconds, 'YYYY-MM-DD' or an ISO-8601 datetime; return unix seconds (UTC)."""
     if value is None or value == "":
         return None
     if isinstance(value, int) and not isinstance(value, bool):
-        return value
-    text = str(value).strip()
-    if text.isdigit():
-        return int(text)
-    try:
-        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
-    except ValueError as exc:
-        raise TestRailError(
-            f"Invalid date {value!r}: use 'YYYY-MM-DD', ISO-8601 or a unix timestamp."
-        ) from exc
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
-    return int(parsed.timestamp())
+        ts = value
+    else:
+        text = str(value).strip()
+        if text.isdigit():
+            ts = int(text)
+        else:
+            try:
+                parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            except ValueError as exc:
+                raise TestRailError(
+                    f"Invalid date {value!r}: use 'YYYY-MM-DD', ISO-8601 or a unix timestamp."
+                ) from exc
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=UTC)
+            ts = int(parsed.timestamp())
+    if ts < 0 or ts > _MAX_TIMESTAMP:
+        raise TestRailError(f"Date out of range: {value!r}.")
+    return ts
 
 
 async def list_page(

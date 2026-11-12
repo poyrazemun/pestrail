@@ -5,6 +5,7 @@ Nothing here deletes, edits or closes anything; every call only *adds* data.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Annotated, Any
@@ -12,7 +13,7 @@ from typing import Annotated, Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from . import shaping as sh
-from .attachments import validate_attachment_path
+from .attachments import MAX_ATTACHMENT_BYTES, validate_attachment_path
 from .client import TestRailError
 from .ids import parse_id, resolve_status
 from .read_tools import CaseId, PlanId, RunId, TestId
@@ -202,19 +203,26 @@ def register(reg: Any) -> None:
         # Numeric IDs still get validated against the instance's list when available.
         return await client.get_statuses()
 
-    def _check_file(path: str) -> Path:
-        return validate_attachment_path(path, roots, allow_any_path=allow_any_path)
+    async def _check_file(path: str) -> Path:
+        return await asyncio.to_thread(
+            validate_attachment_path,
+            path,
+            roots,
+            max_bytes=MAX_ATTACHMENT_BYTES,
+            allow_any_path=allow_any_path,
+        )
 
     async def _scope(**kwargs: Any) -> None:
         await enforce_write_scope(client, reg.config, **kwargs)
 
     async def _upload(method: str, *ids: int | str, file_path: str) -> dict[str, Any]:
-        resolved = _check_file(file_path)
+        resolved = await _check_file(file_path)
         data = await client.upload(method, *ids, file_path=resolved)
+        size_bytes = await asyncio.to_thread(lambda: resolved.stat().st_size)
         return {
             "attachment_id": (data or {}).get("attachment_id"),
             "file": resolved.name,
-            "size_bytes": resolved.stat().st_size,
+            "size_bytes": size_bytes,
         }
 
     # ------------------------------------------------------------------ results
@@ -331,9 +339,17 @@ def register(reg: Any) -> None:
             raise TestRailError("Nothing was sent. Fix these entries:\n" + "\n".join(errors))
 
         created = await client.post("add_results_for_cases", rid, body={"results": payload})
+        if not isinstance(created, list):
+            raise TestRailError(
+                "Unexpected response from add_results_for_cases: expected a list of results."
+            )
+        if len(created) != len(payload):
+            raise TestRailError(
+                f"TestRail returned {len(created)} results but {len(payload)} were sent."
+            )
         labels = await reg.status_labels()
         summaries = []
-        for sent, result in zip(payload, created or [], strict=False):
+        for sent, result in zip(payload, created, strict=True):
             summary = _result_summary(result, labels)
             summary["case_id"] = sent["case_id"]
             summaries.append(summary)
@@ -441,7 +457,7 @@ def register(reg: Any) -> None:
         problems = []
         for path in file_paths:
             try:
-                _check_file(path)
+                await _check_file(path)
             except TestRailError as exc:
                 problems.append(str(exc))
         if problems:
@@ -449,6 +465,11 @@ def register(reg: Any) -> None:
 
         result = await client.post("add_result_for_case", rid, cid, body=body) or {}
         result_id = result.get("id")
+        if not isinstance(result_id, int) or result_id <= 0:
+            raise TestRailError(
+                "Result was created but TestRail returned no usable result id; "
+                "attachments were not uploaded. Inspect the run manually."
+            )
         out = _result_summary(result, await reg.status_labels())
         out = {"result_id": result_id, "case_id": cid, "run_id": rid, **out}
         out.pop("id", None)
@@ -457,7 +478,7 @@ def register(reg: Any) -> None:
         for path in file_paths:
             try:
                 uploaded.append(
-                    await _upload("add_attachment_to_result", int(result_id), file_path=path)
+                    await _upload("add_attachment_to_result", result_id, file_path=path)
                 )
             except (TestRailError, OSError, TypeError, ValueError) as exc:
                 failed.append({"file": path, "error": str(exc) or type(exc).__name__})
