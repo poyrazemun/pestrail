@@ -328,6 +328,62 @@ def test_429_gives_up_after_max_retries(mock_api):
     assert route.call_count == 3
 
 
+def test_429_fails_fast_when_retry_after_exceeds_budget(mock_api):
+    delays: list[float] = []
+
+    async def fake_sleep(d: float) -> None:
+        delays.append(d)
+
+    c = TestRailClient(make_config(), sleep=fake_sleep)
+    route = mock_api.get(API + "get_projects").mock(
+        return_value=httpx.Response(429, headers={"Retry-After": "120"}, json={"error": "slow"})
+    )
+    with pytest.raises(TestRailError, match="asked to wait 120s") as info:
+        run(c.get("get_projects"))
+    assert info.value.status_code == 429
+    assert route.call_count == 1  # no pointless retry
+    assert delays == []
+
+
+def test_429_total_wait_is_budgeted(mock_api):
+    delays: list[float] = []
+
+    async def fake_sleep(d: float) -> None:
+        delays.append(d)
+
+    c = TestRailClient(make_config(), sleep=fake_sleep, max_retries=5, max_total_wait=30)
+    route = mock_api.get(API + "get_projects").mock(
+        return_value=httpx.Response(429, headers={"Retry-After": "20"})
+    )
+    with pytest.raises(TestRailError):
+        run(c.get("get_projects"))
+    assert delays == [20.0]  # a second 20s wait would exceed the 30s budget
+    assert route.call_count == 2
+
+
+def test_upload_uses_upload_timeout(mock_api, tmp_path):
+    f = tmp_path / "big.log"
+    f.write_text("x", encoding="utf-8")
+    cfg = make_config()
+    c = TestRailClient(type(cfg)(**{**cfg.__dict__, "upload_timeout": 600.0}), sleep=_no_sleep)
+    route = mock_api.post(API + "add_attachment_to_run/1").mock(
+        return_value=httpx.Response(200, json={"attachment_id": 1})
+    )
+    run(c.upload("add_attachment_to_run", 1, file_path=f))
+    timeout = route.calls.last.request.extensions["timeout"]
+    assert timeout["read"] == 600.0
+    assert timeout["write"] == 600.0
+    assert timeout["connect"] == cfg.timeout
+
+
+def test_upload_timeout_message(client, mock_api, tmp_path):
+    f = tmp_path / "big.log"
+    f.write_text("x", encoding="utf-8")
+    mock_api.post(API + "add_attachment_to_run/1").mock(side_effect=httpx.WriteTimeout("slow"))
+    with pytest.raises(TestRailError, match="TESTRAIL_UPLOAD_TIMEOUT"):
+        run(client.upload("add_attachment_to_run", 1, file_path=f))
+
+
 def test_retry_after_is_capped():
     assert client_module._parse_retry_after("100000") == client_module.MAX_RETRY_DELAY
     assert client_module._parse_retry_after(None) == client_module.DEFAULT_RETRY_DELAY

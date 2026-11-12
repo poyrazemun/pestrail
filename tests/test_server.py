@@ -93,6 +93,41 @@ def test_tool_annotations(mock_api):
         assert tool.description and len(tool.description) > 20
 
 
+def test_tool_output_is_compact_json(mock_api):
+    mock_api.get(url__startswith=API + "get_projects").mock(
+        return_value=httpx.Response(
+            200, json=[{"id": 1, "name": "Ödeme Sistemi", "suite_mode": 1, "url": "u"}]
+        )
+    )
+    result = asyncio.run(build().call_tool("get_projects", {}))
+    text = result.content[0].text
+    assert "\n" not in text
+    assert ": " not in text and ", " not in text
+    assert "Ödeme Sistemi" in text  # non-ASCII kept readable, not \u-escaped
+    assert json.loads(text)["projects"][0]["id"] == 1
+
+
+def test_lifespan_closes_http_client(mock_api):
+    config = make_config()
+    client = TestRailClient(config, sleep=_no_sleep)
+    server = create_server(config, client)
+
+    async def session() -> None:
+        async with server.settings.lifespan(server):
+            assert not client._http.is_closed
+
+    asyncio.run(session())
+    assert client._http.is_closed
+
+
+def test_version_has_single_source():
+    from importlib.metadata import version
+
+    import pestrail
+
+    assert version("pestrail") == pestrail.__version__
+
+
 # ----------------------------------------------------------------- read tools
 
 

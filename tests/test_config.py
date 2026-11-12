@@ -136,6 +136,13 @@ def test_url_with_query_rejected():
         normalize_url("https://x.testrail.io/?foo=bar")
 
 
+def test_upload_timeout():
+    assert load_config(BASE_ENV).upload_timeout == 300.0
+    assert load_config({**BASE_ENV, "TESTRAIL_UPLOAD_TIMEOUT": "900"}).upload_timeout == 900.0
+    with pytest.raises(ConfigError, match="TESTRAIL_UPLOAD_TIMEOUT"):
+        load_config({**BASE_ENV, "TESTRAIL_UPLOAD_TIMEOUT": "-1"})
+
+
 @pytest.mark.parametrize("raw", ["nan", "inf", "-inf"])
 def test_timeout_must_be_finite(raw):
     with pytest.raises(ConfigError, match="finite"):

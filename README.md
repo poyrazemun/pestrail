@@ -81,7 +81,9 @@ Conveniences:
   TestRail 6.7+ and the bare lists of older versions are handled.
 - **Compact output**: list tools return only the fields that matter, and timestamps are
   converted to ISO-8601 UTC. Use `get_case` / `get_test` / `get_run` for full details.
-- **Rate limits**: on HTTP 429, pestrail waits for `Retry-After` and retries up to 3 times.
+- **Rate limits**: on HTTP 429, pestrail waits for `Retry-After` and retries up to 3 times,
+  waiting at most 30 seconds in total so the call doesn't outlast your MCP client's timeout.
+  If TestRail asks for a longer wait, the tool fails right away and says how long to wait.
 
 ---
 
@@ -243,6 +245,7 @@ use `/mcp` inside Claude Code.
 | `TESTRAIL_READ_ONLY` | no | `true` to register only read tools. Default `false`. |
 | `TESTRAIL_ATTACHMENT_ROOTS` | no | Directories that attachments may be uploaded from, separated by `;` on Windows and `:` on macOS/Linux. If unset, any file readable by the server process may be uploaded. |
 | `TESTRAIL_TIMEOUT` | no | HTTP timeout in seconds. Default `30`. |
+| `TESTRAIL_UPLOAD_TIMEOUT` | no | Timeout in seconds for sending an attachment and waiting for TestRail to process it. Default `300`. Raise it for very large files or slow links. |
 | `TESTRAIL_CA_BUNDLE` | no | Path to a PEM file with the CA certificate(s) to trust for TestRail. Only needed if the CA is not installed in your OS certificate store (see [Corporate networks](#corporate-networks-proxies-and-tls)). |
 | `TESTRAIL_ALLOW_HTTP` | no | `true` to allow a plain `http://` URL for a non-local host. **Your API key is then sent unencrypted.** Default `false`. |
 | `PESTRAIL_LOG_LEVEL` | no | `DEBUG`, `INFO`, `WARNING` (default) or `ERROR`. Logs go to stderr only. |

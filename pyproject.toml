@@ -1,6 +1,7 @@
 [project]
 name = "pestrail"
-version = "0.1.0"
+# Single source of truth: __version__ in src/pestrail/__init__.py (see [tool.hatch.version]).
+dynamic = ["version"]
 description = "A safety-first MCP server for TestRail: browse projects, cases, runs and plans, add results and attachments. It cannot delete anything."
 readme = "README.md"
 license = "MIT"
@@ -45,6 +46,9 @@ dev = [
 [build-system]
 requires = ["hatchling>=1.26"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "src/pestrail/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/pestrail"]

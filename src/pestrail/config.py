@@ -12,6 +12,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 DEFAULT_TIMEOUT = 30.0
+DEFAULT_UPLOAD_TIMEOUT = 300.0
 _TRUE = {"1", "true", "yes", "on"}
 _FALSE = {"0", "false", "no", "off", ""}
 
@@ -59,6 +60,7 @@ class Config:
     attachment_roots: tuple[Path, ...] = ()
     timeout: float = DEFAULT_TIMEOUT
     ca_bundle: Path | None = None
+    upload_timeout: float = DEFAULT_UPLOAD_TIMEOUT
 
 
 def _is_loopback(host: str | None) -> bool:
@@ -135,15 +137,17 @@ def parse_roots(raw: str | None) -> tuple[Path, ...]:
     return tuple(roots)
 
 
-def parse_timeout(raw: str | None) -> float:
+def parse_timeout(
+    raw: str | None, name: str = "TESTRAIL_TIMEOUT", default: float = DEFAULT_TIMEOUT
+) -> float:
     if raw is None or not raw.strip():
-        return DEFAULT_TIMEOUT
+        return default
     try:
         value = float(raw)
     except ValueError as exc:
-        raise ConfigError(f"TESTRAIL_TIMEOUT must be a number of seconds, got {raw!r}") from exc
+        raise ConfigError(f"{name} must be a number of seconds, got {raw!r}") from exc
     if not math.isfinite(value) or value <= 0:
-        raise ConfigError("TESTRAIL_TIMEOUT must be a finite number greater than 0")
+        raise ConfigError(f"{name} must be a finite number greater than 0")
     return value
 
 
@@ -250,4 +254,7 @@ def load_config(env: Mapping[str, str] | None = None) -> Config:
         attachment_roots=parse_roots(env.get("TESTRAIL_ATTACHMENT_ROOTS")),
         timeout=parse_timeout(env.get("TESTRAIL_TIMEOUT")),
         ca_bundle=parse_ca_bundle(env.get("TESTRAIL_CA_BUNDLE")),
+        upload_timeout=parse_timeout(
+            env.get("TESTRAIL_UPLOAD_TIMEOUT"), "TESTRAIL_UPLOAD_TIMEOUT", DEFAULT_UPLOAD_TIMEOUT
+        ),
     )

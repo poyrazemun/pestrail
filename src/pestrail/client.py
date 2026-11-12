@@ -88,7 +88,11 @@ if any(m.startswith(FORBIDDEN_PREFIXES) for m in ALLOWED_METHODS):  # pragma: no
     raise RuntimeError("Destructive TestRail method found in allowlist; refusing to load.")
 
 MAX_RETRIES_429 = 3
-MAX_RETRY_DELAY = 60.0
+#: Upper bound for a single parsed Retry-After value (sanity clamp for absurd headers).
+MAX_RETRY_DELAY = 3600.0
+#: Total time we are willing to sleep on 429s for one tool call. MCP clients time out
+#: requests (often after ~60s), so waiting longer would just turn into a client timeout.
+MAX_TOTAL_RETRY_WAIT = 30.0
 DEFAULT_RETRY_DELAY = 5.0
 #: Safety cap for helpers that walk through all pages.
 DEFAULT_MAX_ITEMS = 1000
@@ -230,11 +234,16 @@ class TestRailClient:
         transport: httpx.AsyncBaseTransport | None = None,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         max_retries: int = MAX_RETRIES_429,
+        max_total_wait: float = MAX_TOTAL_RETRY_WAIT,
     ) -> None:
         self._config = config
         self._base = f"{config.url}/index.php?/api/v2/"
         self._sleep = sleep
         self._max_retries = max_retries
+        self._max_total_wait = max_total_wait
+        # Uploads of large files need more time to send and for TestRail to process,
+        # but connecting should fail as fast as any other request.
+        self._upload_timeout = httpx.Timeout(config.upload_timeout, connect=config.timeout)
         self._http = httpx.AsyncClient(
             auth=httpx.BasicAuth(config.username, config.api_key.get()),
             timeout=config.timeout,
@@ -309,12 +318,15 @@ class TestRailClient:
         http_method = "GET" if method in READ_METHODS else "POST"
 
         attempt = 0
+        waited = 0.0
         while True:
             try:
                 if file_path is not None:
                     with file_path.open("rb") as fh:
                         response = await self._http.post(
-                            url, files={"attachment": (file_path.name, fh)}
+                            url,
+                            files={"attachment": (file_path.name, fh)},
+                            timeout=self._upload_timeout,
                         )
                 elif http_method == "POST":
                     response = await self._http.post(
@@ -325,6 +337,11 @@ class TestRailClient:
                 else:
                     response = await self._http.get(url)
             except httpx.TimeoutException as exc:
+                if file_path is not None:
+                    raise TestRailError(
+                        f"Upload of {file_path.name} timed out ({method}). For large files, "
+                        f"raise TESTRAIL_UPLOAD_TIMEOUT (now {self._config.upload_timeout:.0f}s)."
+                    ) from exc
                 raise TestRailError(
                     f"Request to TestRail timed out after {self._config.timeout}s ({method})."
                 ) from exc
@@ -335,7 +352,12 @@ class TestRailClient:
 
             if response.status_code == 429 and attempt < self._max_retries:
                 delay = _parse_retry_after(response.headers.get("Retry-After"))
+                if waited + delay > self._max_total_wait:
+                    # Waiting would outlast the MCP client's patience: fail now with a
+                    # message that says how long TestRail wants us to wait.
+                    break
                 attempt += 1
+                waited += delay
                 logger.warning(
                     "TestRail rate limit hit on %s; retry %d/%d in %.1fs",
                     method,
@@ -376,6 +398,9 @@ class TestRailClient:
                 "(use the exact https:// address of your instance)."
             )
         hint = _STATUS_HINTS.get(status, "")
+        if status == 429 and response.headers.get("Retry-After"):
+            wait = _parse_retry_after(response.headers.get("Retry-After"))
+            hint = f"{hint} TestRail asked to wait {wait:.0f}s before retrying."
         if message and hint:
             message = f"{message} ({hint})"
         raise TestRailError(message or hint or f"Request failed for {method}.", status)
