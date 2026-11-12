@@ -36,7 +36,7 @@ between installers. The Microsoft Store version keeps it in its own app-data fol
   "mcpServers": {
     "testrail": {
       "command": "uvx",
-      "args": ["--from", "git+https://github.com/poyrazemun/pestrail", "pestrail"],
+      "args": ["pestrail"],
       "env": {
         "TESTRAIL_URL": "https://your-company.testrail.io",
         "TESTRAIL_USERNAME": "qa-assistant@your-company.com",
@@ -66,7 +66,7 @@ claude mcp add testrail --scope user `
   -e TESTRAIL_API_KEY=your-api-key `
   -e "TESTRAIL_ATTACHMENT_ROOTS=C:\Users\you\test-artifacts;D:\ci-logs" `
   -e PESTRAIL_ENV_FILE=none `
-  -- uvx --from git+https://github.com/poyrazemun/pestrail pestrail
+  -- uvx pestrail
 ```
 
 Check it with `claude mcp list`, or `/mcp` in a new session. Claude Code stores the values in

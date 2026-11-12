@@ -30,8 +30,8 @@ given by name (`"Failed"`, custom statuses too).
 1. **Get an API key.** A TestRail admin enables the API once (**Administration > Site
    Settings > API**). Then go to **My Settings > API Keys > Add Key**. Prefer a dedicated
    user with a role that can only view and add results.
-2. **Install [uv](https://docs.astral.sh/uv/getting-started/installation/).** pestrail isn't
-   on PyPI yet, so it runs from GitHub with `uvx --from git+https://github.com/poyrazemun/pestrail pestrail`.
+2. **Install [uv](https://docs.astral.sh/uv/getting-started/installation/).** pestrail is on
+   [PyPI](https://pypi.org/project/pestrail/), so `uvx pestrail` downloads and runs it; check with `uvx pestrail --version`.
 3. **Add it to your MCP client.** Start read-only and enable writes later.
 
 **Claude Desktop:** open **Settings > Desktop app > Extensions > Manage > Edit Config**, add the block below, then
@@ -42,7 +42,7 @@ quit Claude Desktop completely and start it again.
   "mcpServers": {
     "testrail": {
       "command": "uvx",
-      "args": ["--from", "git+https://github.com/poyrazemun/pestrail", "pestrail"],
+      "args": ["pestrail"],
       "env": {
         "TESTRAIL_URL": "https://your-company.testrail.io",
         "TESTRAIL_USERNAME": "you@your-company.com",
@@ -64,7 +64,7 @@ claude mcp add testrail --scope user \
   -e TESTRAIL_API_KEY=your-api-key \
   -e TESTRAIL_READ_ONLY=true \
   -e PESTRAIL_ENV_FILE=none \
-  -- uvx --from git+https://github.com/poyrazemun/pestrail pestrail
+  -- uvx pestrail
 ```
 
 (In PowerShell, end lines with a backtick `` ` `` instead of `\`.)
