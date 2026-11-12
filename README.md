@@ -263,6 +263,10 @@ directories that hold your test artifacts. pestrail then:
 
 - resolves the requested path fully (following symlinks and `..`) **before** checking it, so
   a symlink inside an allowed directory that points outside it is rejected;
+- resolves **relative paths** (e.g. `logs/run-42.log`) against the attachment roots, in
+  order, never against the server's working directory (MCP clients start servers in
+  unpredictable folders). Without `TESTRAIL_ATTACHMENT_ROOTS`, relative paths are rejected
+  and absolute paths are required;
 - only accepts regular files that exist, and rejects anything over TestRail's **256 MB** limit;
 - in `add_result_with_attachments`, checks all files **before** creating the result, so a bad
   path creates nothing.

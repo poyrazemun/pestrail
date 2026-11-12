@@ -56,8 +56,9 @@ CustomFields = Annotated[
 FilePath = Annotated[
     str,
     Field(
-        description="Path to a local file on the machine running this server "
-        "(max 256 MB; may be restricted to TESTRAIL_ATTACHMENT_ROOTS)."
+        description="Absolute path to a local file on the machine running this server, "
+        "max 256 MB. Uploads may be restricted to TESTRAIL_ATTACHMENT_ROOTS; relative paths "
+        "are resolved against those roots and rejected if no roots are configured."
     ),
 ]
 

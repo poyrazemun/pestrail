@@ -8,7 +8,7 @@ from pydantic import Field
 
 from . import shaping as sh
 from .client import TestRailError
-from .ids import parse_id, parse_optional_id, resolve_status_filter
+from .ids import parse_id, parse_id_list, parse_optional_id, resolve_status_filter
 
 # --------------------------------------------------------------------------- parameter types
 
@@ -63,7 +63,7 @@ MaxItems = Annotated[
     int, Field(ge=1, le=5000, description="Safety cap on items when fetch_all is true.")
 ]
 IdList = Annotated[
-    list[int] | int | None,
+    list[int | str] | int | str | None,
     Field(description="One ID or a list of IDs to filter by."),
 ]
 StatusFilter = Annotated[
@@ -114,12 +114,6 @@ def to_timestamp(value: int | str | None) -> int | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=UTC)
     return int(parsed.timestamp())
-
-
-def _ids(value: list[int] | int | None) -> list[int] | None:
-    if value is None:
-        return None
-    return [value] if isinstance(value, int) else list(value)
 
 
 async def list_page(
@@ -253,7 +247,8 @@ def register(reg: Any) -> None:
         project_id: ProjectId,
         suite_id: OptSuiteId = None,
         section_id: Annotated[
-            int | None, Field(description="Only cases directly in this section (get_sections).")
+            int | str | None,
+            Field(description="Only cases directly in this section (get_sections)."),
         ] = None,
         filter: Annotated[
             str | None, Field(description="Only cases whose title contains this text.")
@@ -262,7 +257,9 @@ def register(reg: Any) -> None:
             IdList, Field(description="Priority ID(s); see get_priorities.")
         ] = None,
         type_id: Annotated[IdList, Field(description="Case type ID(s).")] = None,
-        milestone_id: Annotated[IdList, Field(description="Milestone ID(s).")] = None,
+        milestone_id: Annotated[
+            IdList, Field(description="Milestone ID(s), e.g. 2 or ['M2', 'M3'].")
+        ] = None,
         template_id: Annotated[IdList, Field(description="Template ID(s).")] = None,
         refs: Annotated[
             str | None, Field(description="Only cases with this reference, e.g. a Jira key.")
@@ -281,12 +278,12 @@ def register(reg: Any) -> None:
         """
         params = {
             "suite_id": parse_optional_id(suite_id, "suite"),
-            "section_id": section_id,
+            "section_id": parse_optional_id(section_id, "section"),
             "filter": filter,
-            "priority_id": _ids(priority_id),
-            "type_id": _ids(type_id),
-            "milestone_id": _ids(milestone_id),
-            "template_id": _ids(template_id),
+            "priority_id": parse_id_list(priority_id, "priority"),
+            "type_id": parse_id_list(type_id, "case_type"),
+            "milestone_id": parse_id_list(milestone_id, "milestone"),
+            "template_id": parse_id_list(template_id, "template"),
             "refs": refs,
             "updated_after": to_timestamp(updated_after),
             "updated_before": to_timestamp(updated_before),
@@ -405,7 +402,9 @@ def register(reg: Any) -> None:
     async def get_plans(
         project_id: ProjectId,
         is_completed: OptBool = None,
-        milestone_id: Annotated[IdList, Field(description="Milestone ID(s).")] = None,
+        milestone_id: Annotated[
+            IdList, Field(description="Milestone ID(s), e.g. 2 or ['M2', 'M3'].")
+        ] = None,
         created_after: DateFilter = None,
         created_before: DateFilter = None,
         created_by: Annotated[IdList, Field(description="Creator user ID(s).")] = None,
@@ -417,10 +416,10 @@ def register(reg: Any) -> None:
         """List test plans in a project. Use get_plan to see the runs inside a plan."""
         params = {
             "is_completed": is_completed,
-            "milestone_id": _ids(milestone_id),
+            "milestone_id": parse_id_list(milestone_id, "milestone"),
             "created_after": to_timestamp(created_after),
             "created_before": to_timestamp(created_before),
-            "created_by": _ids(created_by),
+            "created_by": parse_id_list(created_by, "user"),
         }
         return await list_page(
             reg,
@@ -460,8 +459,12 @@ def register(reg: Any) -> None:
     async def get_runs(
         project_id: ProjectId,
         is_completed: OptBool = None,
-        milestone_id: Annotated[IdList, Field(description="Milestone ID(s).")] = None,
-        suite_id: Annotated[IdList, Field(description="Suite ID(s).")] = None,
+        milestone_id: Annotated[
+            IdList, Field(description="Milestone ID(s), e.g. 2 or ['M2', 'M3'].")
+        ] = None,
+        suite_id: Annotated[
+            IdList, Field(description="Suite ID(s), e.g. 3 or ['S3', 'S4'].")
+        ] = None,
         created_after: DateFilter = None,
         created_before: DateFilter = None,
         created_by: Annotated[IdList, Field(description="Creator user ID(s).")] = None,
@@ -477,11 +480,11 @@ def register(reg: Any) -> None:
         """
         params = {
             "is_completed": is_completed,
-            "milestone_id": _ids(milestone_id),
-            "suite_id": _ids(suite_id),
+            "milestone_id": parse_id_list(milestone_id, "milestone"),
+            "suite_id": parse_id_list(suite_id, "suite"),
             "created_after": to_timestamp(created_after),
             "created_before": to_timestamp(created_before),
-            "created_by": _ids(created_by),
+            "created_by": parse_id_list(created_by, "user"),
         }
         return await list_page(
             reg,
@@ -626,7 +629,7 @@ def register(reg: Any) -> None:
             "status_id": resolve_status_filter(status, statuses),
             "created_after": to_timestamp(created_after),
             "created_before": to_timestamp(created_before),
-            "created_by": _ids(created_by),
+            "created_by": parse_id_list(created_by, "user"),
             "defects_filter": defects_filter,
         }
         return await list_page(
@@ -708,12 +711,30 @@ def register(reg: Any) -> None:
             int | str | None,
             Field(description="Optional project ID; required on TestRail Cloud for non-admins."),
         ] = None,
+        limit: Limit = None,
+        offset: Offset = 0,
+        fetch_all: Annotated[
+            bool,
+            Field(description="If true (default), return all users up to max_items."),
+        ] = True,
+        max_items: MaxItems = 1000,
     ) -> dict:
-        """List users (id, name, email). Use a user's id as assigned_to_id in result tools."""
+        """List users (id, name, email). Use a user's id as assigned_to_id in result tools.
+
+        To find one person, get_user_by_email is cheaper.
+        """
         pid = parse_optional_id(project_id, "project")
-        data = await (client.get("get_users", pid) if pid else client.get("get_users"))
-        items = data.get("users", []) if isinstance(data, dict) else data
-        return {"users": [sh.pick(u, sh.USER_FIELDS) for u in items or []]}
+        return await list_page(
+            reg,
+            "get_users",
+            *([pid] if pid else []),
+            key="users",
+            shape=lambda u: sh.pick(u, sh.USER_FIELDS),
+            limit=limit,
+            offset=offset,
+            fetch_all=fetch_all,
+            max_items=max_items,
+        )
 
     @reg.read
     async def get_user_by_email(

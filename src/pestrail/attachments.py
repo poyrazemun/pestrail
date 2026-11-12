@@ -20,7 +20,10 @@ def validate_attachment_path(
 ) -> Path:
     """Resolve ``raw_path`` and check it is an existing, allowed, not-too-large regular file.
 
-    * ``~`` is expanded; relative paths are resolved against the server's working directory.
+    * ``~`` is expanded.
+    * Relative paths are resolved against the attachment roots (the first root where the
+      file exists wins), never against the server's working directory, which MCP clients
+      set unpredictably. Without roots, relative paths are rejected.
     * Symlinks and ``..`` are resolved *before* the root check, so a link inside a root that
       points outside it is rejected.
     * If ``roots`` is empty, any readable file is allowed.
@@ -31,6 +34,8 @@ def validate_attachment_path(
         raise AttachmentError("Invalid file path.")
 
     candidate = Path(str(raw_path).strip().strip('"')).expanduser()
+    if not candidate.is_absolute():
+        candidate = _resolve_relative(candidate, raw_path, roots)
     try:
         resolved = candidate.resolve(strict=True)
     except FileNotFoundError as exc:
@@ -55,6 +60,20 @@ def validate_attachment_path(
             f"TestRail's limit is {max_bytes // 1024 // 1024} MB."
         )
     return resolved
+
+
+def _resolve_relative(candidate: Path, raw_path: str, roots: Sequence[Path]) -> Path:
+    if not roots:
+        raise AttachmentError(
+            f"Relative path {raw_path!r} is not supported: use an absolute path "
+            "(or set TESTRAIL_ATTACHMENT_ROOTS so relative paths are resolved against it)."
+        )
+    for root in roots:
+        joined = root / candidate
+        if joined.exists():
+            return joined
+    searched = ", ".join(str(r) for r in roots)
+    raise AttachmentError(f"File not found: {raw_path} (searched in: {searched})")
 
 
 def _is_within(path: Path, root: Path) -> bool:

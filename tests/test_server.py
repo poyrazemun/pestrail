@@ -214,6 +214,59 @@ def test_dates_accept_iso(mock_api):
     assert "created_after=1704067200" in str(route.calls.last.request.url)
 
 
+def test_list_filters_accept_prefixed_ids(mock_api):
+    runs = mock_api.get(url__startswith=API + "get_runs/1").mock(
+        return_value=httpx.Response(200, json=[])
+    )
+    call(build(), "get_runs", {"project_id": "P1", "suite_id": ["S3", 4], "milestone_id": "M2"})
+    assert str(runs.calls.last.request.url) == API + "get_runs/1&milestone_id=2&suite_id=3,4"
+
+    cases = mock_api.get(url__startswith=API + "get_cases/1").mock(
+        return_value=httpx.Response(200, json=[])
+    )
+    call(build(), "get_cases", {"project_id": 1, "section_id": "7", "milestone_id": ["M5"]})
+    assert str(cases.calls.last.request.url) == API + "get_cases/1&section_id=7&milestone_id=5"
+
+
+def test_list_filter_wrong_prefix_rejected(mock_api):
+    route = mock_api.route().mock(return_value=httpx.Response(200, json=[]))
+    with pytest.raises(ToolError, match="does not belong to a suite"):
+        asyncio.run(build().call_tool("get_runs", {"project_id": 1, "suite_id": "R3"}))
+    assert route.call_count == 0
+
+
+def test_get_users_follows_pagination(mock_api):
+    page1 = {
+        "offset": 0,
+        "limit": 1,
+        "size": 1,
+        "_links": {"next": "/api/v2/get_users/3&offset=1"},
+        "users": [{"id": 1, "name": "A", "email": "a@example.invalid", "role": "x"}],
+    }
+    page2 = {
+        "offset": 1,
+        "limit": 1,
+        "size": 1,
+        "_links": {"next": None},
+        "users": [{"id": 2, "name": "B", "email": "b@example.invalid"}],
+    }
+    route = mock_api.get(url__startswith=API + "get_users/3").mock(
+        side_effect=[httpx.Response(200, json=page1), httpx.Response(200, json=page2)]
+    )
+    out = call(build(), "get_users", {"project_id": "P3"})
+    assert [u["id"] for u in out["users"]] == [1, 2]
+    assert out["count"] == 2
+    assert str(route.calls[1].request.url).endswith("get_users/3&offset=1")
+
+
+def test_get_users_legacy_list_without_project(mock_api):
+    mock_api.get(API + "get_users").mock(
+        return_value=httpx.Response(200, json=[{"id": 1, "name": "A", "email": "a@x.invalid"}])
+    )
+    out = call(build(), "get_users", {})
+    assert out["users"] == [{"id": 1, "name": "A", "email": "a@x.invalid"}]
+
+
 def test_results_comments_truncated_and_custom_kept(mock_api, statuses):
     mock_api.get(url__startswith=API + "get_results_for_run/5").mock(
         return_value=httpx.Response(

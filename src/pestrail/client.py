@@ -385,10 +385,17 @@ class TestRailClient:
             if offset:
                 page_params["offset"] = offset
             items, meta = await self.get_page(method, *path_args, key=key, params=page_params)
+            if not meta.get("paginated"):
+                # TestRail < 6.7 returns the whole list as a bare array and ignores
+                # limit/offset, so apply the offset here. There are no further pages.
+                items = items[offset:]
+                more = False
+            else:
+                more = bool(meta.get("has_more")) and bool(items)
             collected.extend(items)
-            if len(collected) >= max_items:
+            if len(collected) > max_items or (len(collected) == max_items and more):
                 return collected[:max_items], True
-            if not meta.get("paginated") or not meta.get("has_more") or not items:
+            if not more:
                 return collected, False
             offset += len(items)
 

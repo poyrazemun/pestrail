@@ -358,6 +358,52 @@ def test_get_all_respects_cap(client, mock_api):
     assert truncated is True
 
 
+def test_get_all_exact_boundary_is_not_truncated(client, mock_api):
+    mock_api.get(url__startswith=API + "get_cases/1").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "offset": 0,
+                "limit": 3,
+                "size": 3,
+                "_links": {"next": None},
+                "cases": [{"id": 1}, {"id": 2}, {"id": 3}],
+            },
+        )
+    )
+    items, truncated = run(client.get_all("get_cases", 1, key="cases", max_items=3))
+    assert len(items) == 3
+    assert truncated is False
+
+
+def test_get_all_exact_boundary_with_more_is_truncated(client, mock_api):
+    mock_api.get(url__startswith=API + "get_cases/1").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "offset": 0,
+                "limit": 3,
+                "size": 3,
+                "_links": {"next": "/api/v2/get_cases/1&offset=3"},
+                "cases": [{"id": 1}, {"id": 2}, {"id": 3}],
+            },
+        )
+    )
+    items, truncated = run(client.get_all("get_cases", 1, key="cases", max_items=3))
+    assert len(items) == 3
+    assert truncated is True
+
+
+def test_get_all_bare_list_applies_offset(client, mock_api):
+    # TestRail < 6.7 ignores offset and returns everything as a bare list.
+    mock_api.get(url__startswith=API + "get_projects").mock(
+        return_value=httpx.Response(200, json=[{"id": i} for i in range(5)])
+    )
+    items, truncated = run(client.get_all("get_projects", key="projects", params={"offset": 2}))
+    assert [i["id"] for i in items] == [2, 3, 4]
+    assert truncated is False
+
+
 def test_get_all_bare_list_single_request(client, mock_api):
     route = mock_api.get(API + "get_projects").mock(
         return_value=httpx.Response(200, json=[{"id": 1}, {"id": 2}])

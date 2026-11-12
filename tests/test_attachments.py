@@ -66,6 +66,34 @@ def test_no_roots_allows_any_file(layout):
     assert validate_attachment_path(str(outside), []) == outside.resolve()
 
 
+def test_relative_path_resolved_against_roots(layout, tmp_path):
+    root, inside, _, _ = layout
+    other_root = tmp_path / "other"
+    other_root.mkdir()
+    # First root lacks the file, second has it: the first match wins.
+    result = validate_attachment_path(str(Path("sub") / "log.txt"), [other_root.resolve(), root])
+    assert result == inside.resolve()
+
+
+def test_relative_path_without_roots_rejected(tmp_path, monkeypatch):
+    (tmp_path / "here.txt").write_text("x", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)  # even if the file exists in the cwd
+    with pytest.raises(AttachmentError, match="absolute path"):
+        validate_attachment_path("here.txt", [])
+
+
+def test_relative_path_cannot_escape_root(layout):
+    root, _, _, _ = layout
+    with pytest.raises(AttachmentError, match="outside the allowed"):
+        validate_attachment_path(str(Path("..") / "secret" / "creds.txt"), [root])
+
+
+def test_relative_path_not_found_lists_roots(layout):
+    root, _, _, _ = layout
+    with pytest.raises(AttachmentError, match="searched in"):
+        validate_attachment_path("nope.log", [root])
+
+
 def test_missing_file(tmp_path):
     with pytest.raises(AttachmentError, match="not found"):
         validate_attachment_path(str(tmp_path / "missing.log"), [])
