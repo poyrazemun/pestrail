@@ -61,6 +61,10 @@ class Config:
     #: When True and attachment_roots is empty, any readable file may be uploaded.
     #: Must be set explicitly; write mode refuses to start with neither roots nor this flag.
     allow_any_attachment_path: bool = False
+    #: When non-empty, write tools may only target these projects (and runs inside them).
+    allowed_project_ids: frozenset[int] = field(default_factory=frozenset)
+    #: When non-empty, write tools may only target these runs (or tests/results in them).
+    allowed_run_ids: frozenset[int] = field(default_factory=frozenset)
     timeout: float = DEFAULT_TIMEOUT
     ca_bundle: Path | None = None
     upload_timeout: float = DEFAULT_UPLOAD_TIMEOUT
@@ -170,6 +174,20 @@ def parse_ca_bundle(raw: str | None) -> Path | None:
     return path.resolve()
 
 
+def parse_allowed_ids(raw: str | None, kind: str, name: str) -> frozenset[int]:
+    """Parse a comma-separated allowlist of TestRail IDs (numbers or prefixed IDs)."""
+    if raw is None or not raw.strip():
+        return frozenset()
+    from .client import TestRailError
+    from .ids import parse_id_list
+
+    try:
+        values = parse_id_list(raw, kind)
+    except TestRailError as exc:
+        raise ConfigError(f"{name} is invalid: {exc}") from exc
+    return frozenset(values or [])
+
+
 def user_config_dir(environ: Mapping[str, str] | None = None, *, os_name: str = os.name) -> Path:
     """Per-user config directory: %APPDATA%\\pestrail on Windows, else
     $XDG_CONFIG_HOME/pestrail or ~/.config/pestrail."""
@@ -268,6 +286,12 @@ def load_config(env: Mapping[str, str] | None = None) -> Config:
         read_only=read_only,
         attachment_roots=attachment_roots,
         allow_any_attachment_path=allow_any_attachment_path,
+        allowed_project_ids=parse_allowed_ids(
+            env.get("TESTRAIL_ALLOWED_PROJECT_IDS"), "project", "TESTRAIL_ALLOWED_PROJECT_IDS"
+        ),
+        allowed_run_ids=parse_allowed_ids(
+            env.get("TESTRAIL_ALLOWED_RUN_IDS"), "run", "TESTRAIL_ALLOWED_RUN_IDS"
+        ),
         timeout=parse_timeout(env.get("TESTRAIL_TIMEOUT")),
         ca_bundle=parse_ca_bundle(env.get("TESTRAIL_CA_BUNDLE")),
         upload_timeout=parse_timeout(

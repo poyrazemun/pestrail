@@ -53,6 +53,7 @@ READ_METHODS: frozenset[str] = frozenset(
         "get_tests",
         "get_test",
         "get_results",
+        "get_result",
         "get_results_for_case",
         "get_results_for_run",
         "get_attachments_for_case",

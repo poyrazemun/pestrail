@@ -19,3 +19,5 @@ htmlcov/
 Thumbs.db
 .claude/
 .flake8
+# Local audit progress tracker (not committed)
+AUDIT_TODO.md

@@ -35,8 +35,19 @@ WRITE_TOOLS = {
 }
 
 
-def build(read_only: bool = False, roots: tuple[Path, ...] = ()):
-    config = make_config(read_only=read_only, roots=roots)
+def build(
+    read_only: bool = False,
+    roots: tuple[Path, ...] = (),
+    *,
+    allowed_project_ids: frozenset[int] = frozenset(),
+    allowed_run_ids: frozenset[int] = frozenset(),
+):
+    config = make_config(
+        read_only=read_only,
+        roots=roots,
+        allowed_project_ids=allowed_project_ids,
+        allowed_run_ids=allowed_run_ids,
+    )
     return create_server(config, TestRailClient(config, sleep=_no_sleep))
 
 

@@ -13,6 +13,7 @@ from .attachments import validate_attachment_path
 from .client import TestRailError
 from .ids import parse_id, resolve_status
 from .read_tools import CaseId, PlanId, RunId, TestId
+from .scope import enforce_write_scope
 
 MAX_BULK_RESULTS = 500
 MAX_FILES_PER_CALL = 20
@@ -145,6 +146,9 @@ def register(reg: Any) -> None:
     def _check_file(path: str) -> Path:
         return validate_attachment_path(path, roots, allow_any_path=allow_any_path)
 
+    async def _scope(**kwargs: Any) -> None:
+        await enforce_write_scope(client, reg.config, **kwargs)
+
     async def _upload(method: str, *ids: int | str, file_path: str) -> dict[str, Any]:
         resolved = _check_file(file_path)
         data = await client.upload(method, *ids, file_path=resolved)
@@ -173,6 +177,8 @@ def register(reg: Any) -> None:
         use add_result_for_case instead. Results are appended to the history and cannot be
         removed through this server, so double-check the IDs. Fails if the run is closed.
         """
+        tid = parse_id(test_id, "test")
+        await _scope(test_id=tid)
         body = build_result_body(
             status=status,
             comment=comment,
@@ -183,7 +189,7 @@ def register(reg: Any) -> None:
             custom_fields=custom_fields,
             statuses=await _statuses_if(status),
         )
-        result = await client.post("add_result", parse_id(test_id, "test"), body=body)
+        result = await client.post("add_result", tid, body=body)
         return _result_summary(result or {}, await reg.status_labels())
 
     @reg.write
@@ -204,6 +210,8 @@ def register(reg: Any) -> None:
         appended and cannot be removed through this server. Fails if the run is closed.
         To attach logs/screenshots in the same step, use add_result_with_attachments.
         """
+        rid, cid = parse_id(run_id, "run"), parse_id(case_id, "case")
+        await _scope(run_id=rid)
         body = build_result_body(
             status=status,
             comment=comment,
@@ -214,11 +222,9 @@ def register(reg: Any) -> None:
             custom_fields=custom_fields,
             statuses=await _statuses_if(status),
         )
-        result = await client.post(
-            "add_result_for_case", parse_id(run_id, "run"), parse_id(case_id, "case"), body=body
-        )
+        result = await client.post("add_result_for_case", rid, cid, body=body)
         out = _result_summary(result or {}, await reg.status_labels())
-        out["case_id"] = parse_id(case_id, "case")
+        out["case_id"] = cid
         return out
 
     @reg.write
@@ -242,6 +248,7 @@ def register(reg: Any) -> None:
         in the run (see get_tests). Results cannot be removed through this server.
         """
         rid = parse_id(run_id, "run")
+        await _scope(run_id=rid)
         need_statuses = any(r.status not in (None, "") for r in results)
         statuses = await client.get_statuses() if need_statuses else []
         payload = []
@@ -286,27 +293,30 @@ def register(reg: Any) -> None:
         file_path: FilePath,
     ) -> dict:
         """Upload a local file (log, screenshot, report) and attach it to an existing result."""
+        await _scope(result_id=result_id)
         return await _upload("add_attachment_to_result", result_id, file_path=file_path)
 
     @reg.write
     async def add_attachment_to_run(run_id: RunId, file_path: FilePath) -> dict:
         """Upload a local file and attach it to a test run (e.g. a full test report)."""
-        return await _upload("add_attachment_to_run", parse_id(run_id, "run"), file_path=file_path)
+        rid = parse_id(run_id, "run")
+        await _scope(run_id=rid)
+        return await _upload("add_attachment_to_run", rid, file_path=file_path)
 
     @reg.write
     async def add_attachment_to_case(case_id: CaseId, file_path: FilePath) -> dict:
         """Upload a local file and attach it to a test case. This does not change the case's
         fields; it only adds an attachment."""
-        return await _upload(
-            "add_attachment_to_case", parse_id(case_id, "case"), file_path=file_path
-        )
+        cid = parse_id(case_id, "case")
+        await _scope(case_id=cid)
+        return await _upload("add_attachment_to_case", cid, file_path=file_path)
 
     @reg.write
     async def add_attachment_to_plan(plan_id: PlanId, file_path: FilePath) -> dict:
         """Upload a local file and attach it to a test plan."""
-        return await _upload(
-            "add_attachment_to_plan", parse_id(plan_id, "plan"), file_path=file_path
-        )
+        pid = parse_id(plan_id, "plan")
+        await _scope(plan_id=pid)
+        return await _upload("add_attachment_to_plan", pid, file_path=file_path)
 
     @reg.write
     async def add_attachment_to_plan_entry(
@@ -318,9 +328,11 @@ def register(reg: Any) -> None:
         file_path: FilePath,
     ) -> dict:
         """Upload a local file and attach it to an entry (group of runs) in a test plan."""
+        pid = parse_id(plan_id, "plan")
+        await _scope(plan_id=pid)
         return await _upload(
             "add_attachment_to_plan_entry",
-            parse_id(plan_id, "plan"),
+            pid,
             entry_id.strip(),
             file_path=file_path,
         )
@@ -355,6 +367,7 @@ def register(reg: Any) -> None:
         uploads succeeded and which failed; retry failures with add_attachment_to_result.
         """
         rid, cid = parse_id(run_id, "run"), parse_id(case_id, "case")
+        await _scope(run_id=rid)
         body = build_result_body(
             status=status,
             comment=comment,

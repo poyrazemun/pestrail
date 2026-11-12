@@ -245,6 +245,8 @@ use `/mcp` inside Claude Code.
 | `TESTRAIL_READ_ONLY` | no | `true` to register only read tools. Default `false`. |
 | `TESTRAIL_ATTACHMENT_ROOTS` | write mode | Directories that attachments may be uploaded from, separated by `;` on Windows and `:` on macOS/Linux. **Required when write tools are enabled**, unless `TESTRAIL_ALLOW_ANY_ATTACHMENT_PATH=true`. Not required in read-only mode. |
 | `TESTRAIL_ALLOW_ANY_ATTACHMENT_PATH` | no | `true` to allow uploading any readable file when `TESTRAIL_ATTACHMENT_ROOTS` is unset. **Your assistant could then exfiltrate secrets** (e.g. `~/.ssh/id_rsa`) to TestRail. Default `false`. |
+| `TESTRAIL_ALLOWED_PROJECT_IDS` | no | Comma-separated project IDs (e.g. `1,P3`). When set, write tools may only target these projects. |
+| `TESTRAIL_ALLOWED_RUN_IDS` | no | Comma-separated run IDs (e.g. `R56,78`). When set, write tools may only target these runs (or tests/results inside them). Case/plan uploads need `TESTRAIL_ALLOWED_PROJECT_IDS` as well if you use a run allowlist. |
 | `TESTRAIL_TIMEOUT` | no | HTTP timeout in seconds. Default `30`. |
 | `TESTRAIL_UPLOAD_TIMEOUT` | no | Timeout in seconds for sending an attachment and waiting for TestRail to process it. Default `300`. Raise it for very large files or slow links. |
 | `TESTRAIL_CA_BUNDLE` | no | Path to a PEM file with the CA certificate(s) to trust for TestRail. Only needed if the CA is not installed in your OS certificate store (see [Corporate networks](#corporate-networks-proxies-and-tls)). |
@@ -315,6 +317,19 @@ effect.
 With `TESTRAIL_READ_ONLY=true`, the 9 write tools are **not registered**: the assistant
 doesn't even see them. Use this for exploration, reporting, triage, or when you share the
 setup with people who should only browse.
+
+### Limiting where writes can go
+
+Even with a least-privilege TestRail user, an assistant can still pick the wrong run or
+project. Optionally set:
+
+- `TESTRAIL_ALLOWED_PROJECT_IDS` — writes only in those projects
+- `TESTRAIL_ALLOWED_RUN_IDS` — writes only for those runs (and tests/results inside them)
+
+Empty means unrestricted (aside from TestRail permissions). When both are set, a
+run-scoped write must satisfy both. Case/plan attachment tools are not tied to a run: if
+you only set `TESTRAIL_ALLOWED_RUN_IDS`, those tools are refused unless you also set
+`TESTRAIL_ALLOWED_PROJECT_IDS`.
 
 ### Restricting attachment uploads
 

@@ -22,6 +22,8 @@ def make_config(
     read_only: bool = False,
     roots: tuple[Path, ...] = (),
     allow_any_attachment_path: bool | None = None,
+    allowed_project_ids: frozenset[int] = frozenset(),
+    allowed_run_ids: frozenset[int] = frozenset(),
     timeout: float = 5.0,
 ) -> Config:
     # Tests that exercise uploads without roots opt into the explicit escape hatch,
@@ -35,6 +37,8 @@ def make_config(
         read_only=read_only,
         attachment_roots=roots,
         allow_any_attachment_path=allow_any_attachment_path,
+        allowed_project_ids=allowed_project_ids,
+        allowed_run_ids=allowed_run_ids,
         timeout=timeout,
     )
 

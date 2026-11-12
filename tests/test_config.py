@@ -12,6 +12,7 @@ from pestrail.config import (
     env_file_location,
     load_config,
     normalize_url,
+    parse_allowed_ids,
     user_config_dir,
 )
 
@@ -136,6 +137,32 @@ def test_attachment_roots(tmp_path: Path):
 def test_attachment_root_must_exist(tmp_path: Path):
     with pytest.raises(ConfigError, match="does not exist"):
         load_config({**BASE_ENV, "TESTRAIL_ATTACHMENT_ROOTS": str(tmp_path / "nope")})
+
+
+def test_allowed_ids_parse_prefixed_and_blank():
+    assert parse_allowed_ids("P1, 2, P3", "project", "TESTRAIL_ALLOWED_PROJECT_IDS") == frozenset(
+        {1, 2, 3}
+    )
+    assert parse_allowed_ids("R56, 78", "run", "TESTRAIL_ALLOWED_RUN_IDS") == frozenset({56, 78})
+    assert parse_allowed_ids(None, "run", "TESTRAIL_ALLOWED_RUN_IDS") == frozenset()
+    assert parse_allowed_ids("  ", "run", "TESTRAIL_ALLOWED_RUN_IDS") == frozenset()
+
+
+def test_allowed_ids_reject_wrong_prefix():
+    with pytest.raises(ConfigError, match="TESTRAIL_ALLOWED_RUN_IDS"):
+        parse_allowed_ids("C1", "run", "TESTRAIL_ALLOWED_RUN_IDS")
+
+
+def test_load_config_allowed_scopes():
+    cfg = load_config(
+        {
+            **BASE_ENV,
+            "TESTRAIL_ALLOWED_PROJECT_IDS": "P1,2",
+            "TESTRAIL_ALLOWED_RUN_IDS": "R56",
+        }
+    )
+    assert cfg.allowed_project_ids == frozenset({1, 2})
+    assert cfg.allowed_run_ids == frozenset({56})
 
 
 # ----------------------------------------------------------------- http:// refusal
