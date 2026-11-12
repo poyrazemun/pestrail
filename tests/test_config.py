@@ -5,7 +5,15 @@ from pathlib import Path
 
 import pytest
 
-from pestrail.config import ConfigError, Secret, load_config, normalize_url
+from pestrail.config import (
+    ConfigError,
+    Secret,
+    apply_env_file,
+    env_file_location,
+    load_config,
+    normalize_url,
+    user_config_dir,
+)
 
 BASE_ENV = {
     "TESTRAIL_URL": "https://testrail.invalid/",
@@ -99,6 +107,139 @@ def test_attachment_roots(tmp_path: Path):
 def test_attachment_root_must_exist(tmp_path: Path):
     with pytest.raises(ConfigError, match="does not exist"):
         load_config({**BASE_ENV, "TESTRAIL_ATTACHMENT_ROOTS": str(tmp_path / "nope")})
+
+
+# ----------------------------------------------------------------- http:// refusal
+
+
+def test_plain_http_rejected():
+    with pytest.raises(ConfigError, match="unencrypted"):
+        load_config({**BASE_ENV, "TESTRAIL_URL": "http://testrail.corp.invalid"})
+
+
+@pytest.mark.parametrize(
+    "url", ["http://localhost:8080", "http://127.0.0.1", "http://[::1]:8000/testrail"]
+)
+def test_plain_http_allowed_for_loopback(url):
+    assert load_config({**BASE_ENV, "TESTRAIL_URL": url}).url == url
+
+
+def test_plain_http_allowed_with_opt_in():
+    cfg = load_config(
+        {**BASE_ENV, "TESTRAIL_URL": "http://lab.invalid", "TESTRAIL_ALLOW_HTTP": "true"}
+    )
+    assert cfg.url == "http://lab.invalid"
+
+
+def test_url_with_query_rejected():
+    with pytest.raises(ConfigError, match="without"):
+        normalize_url("https://x.testrail.io/?foo=bar")
+
+
+@pytest.mark.parametrize("raw", ["nan", "inf", "-inf"])
+def test_timeout_must_be_finite(raw):
+    with pytest.raises(ConfigError, match="finite"):
+        load_config({**BASE_ENV, "TESTRAIL_TIMEOUT": raw})
+
+
+# ----------------------------------------------------------------- CA bundle
+
+
+def test_ca_bundle_valid():
+    import certifi
+
+    cfg = load_config({**BASE_ENV, "TESTRAIL_CA_BUNDLE": certifi.where()})
+    assert cfg.ca_bundle == Path(certifi.where()).resolve()
+
+
+def test_ca_bundle_missing(tmp_path: Path):
+    with pytest.raises(ConfigError, match="not found"):
+        load_config({**BASE_ENV, "TESTRAIL_CA_BUNDLE": str(tmp_path / "nope.pem")})
+
+
+def test_ca_bundle_garbage(tmp_path: Path):
+    bad = tmp_path / "bad.pem"
+    bad.write_text("not a certificate", encoding="utf-8")
+    with pytest.raises(ConfigError, match="PEM"):
+        load_config({**BASE_ENV, "TESTRAIL_CA_BUNDLE": str(bad)})
+
+
+# ----------------------------------------------------------------- .env merging
+
+
+def test_env_file_fills_missing_values_only():
+    environ = {"TESTRAIL_USERNAME": "real@example.invalid"}
+    applied, ignored = apply_env_file(
+        {
+            "TESTRAIL_URL": "https://from-file.invalid",
+            "TESTRAIL_USERNAME": "file@example.invalid",
+            "TESTRAIL_API_KEY": "file-key",
+        },
+        environ,
+    )
+    assert environ["TESTRAIL_USERNAME"] == "real@example.invalid"  # real env wins
+    assert environ["TESTRAIL_URL"] == "https://from-file.invalid"
+    assert sorted(applied) == ["TESTRAIL_API_KEY", "TESTRAIL_URL"]
+    assert ignored == []
+
+
+def test_env_file_ignores_foreign_keys():
+    environ: dict[str, str] = {}
+    applied, ignored = apply_env_file(
+        {
+            "HTTPS_PROXY": "http://evil.invalid:8080",
+            "SSL_CERT_FILE": "/tmp/evil.pem",
+            "PATH": "/evil",
+            "PESTRAIL_ENV_FILE": "/other/.env",
+            "TESTRAIL_READ_ONLY": "true",
+            "EMPTY": None,
+        },
+        environ,
+    )
+    assert environ == {"TESTRAIL_READ_ONLY": "true"}
+    assert applied == ["TESTRAIL_READ_ONLY"]
+    assert sorted(ignored) == ["HTTPS_PROXY", "PATH", "PESTRAIL_ENV_FILE", "SSL_CERT_FILE"]
+
+
+@pytest.mark.parametrize("key", ["TESTRAIL_URL", "TESTRAIL_CA_BUNDLE", "TESTRAIL_ALLOW_HTTP"])
+def test_env_file_cannot_redirect_key_from_environment(key):
+    environ = {"TESTRAIL_API_KEY": "real-key", "TESTRAIL_USERNAME": "u"}
+    with pytest.raises(ConfigError, match="decide where your API key is sent"):
+        apply_env_file({key: "x"}, environ)
+    assert key not in environ
+
+
+def test_env_file_destination_ok_when_already_in_environment():
+    # URL is set in the real env too, so the .env value is simply ignored (real env wins).
+    environ = {"TESTRAIL_API_KEY": "k", "TESTRAIL_URL": "https://real.invalid"}
+    apply_env_file({"TESTRAIL_URL": "https://file.invalid"}, environ)
+    assert environ["TESTRAIL_URL"] == "https://real.invalid"
+
+
+# ----------------------------------------------------------------- .env location
+
+
+def test_user_config_dir_windows():
+    env = {"APPDATA": r"C:\Users\qa\AppData\Roaming"}
+    assert user_config_dir(env, os_name="nt") == Path(env["APPDATA"]) / "pestrail"
+
+
+def test_user_config_dir_posix_xdg_and_default():
+    assert user_config_dir({"XDG_CONFIG_HOME": "/cfg"}, os_name="posix") == Path("/cfg/pestrail")
+    assert user_config_dir({}, os_name="posix") == Path.home() / ".config" / "pestrail"
+
+
+def test_env_file_default_is_per_user_not_cwd():
+    path, explicit = env_file_location({"XDG_CONFIG_HOME": "/cfg"}, os_name="posix")
+    assert path == Path("/cfg/pestrail/.env")
+    assert explicit is False
+    assert path != Path.cwd() / ".env"
+
+
+def test_env_file_explicit_and_disabled():
+    assert env_file_location({"PESTRAIL_ENV_FILE": "my.env"}) == (Path("my.env"), True)
+    assert env_file_location({"PESTRAIL_ENV_FILE": "NONE"}) == (None, True)
+    assert env_file_location({"PESTRAIL_ENV_FILE": os.devnull}) == (None, True)
 
 
 def test_secret_is_never_rendered():

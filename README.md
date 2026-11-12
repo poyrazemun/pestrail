@@ -237,17 +237,74 @@ use `/mcp` inside Claude Code.
 
 | Variable | Required | Description |
 |---|---|---|
-| `TESTRAIL_URL` | yes | Your instance URL, e.g. `https://your-company.testrail.io`. Trailing slashes and a pasted `/index.php?/api/v2` are stripped. Must not contain credentials. |
+| `TESTRAIL_URL` | yes | Your instance URL, e.g. `https://your-company.testrail.io`. Trailing slashes and a pasted `/index.php?/api/v2` are stripped. Must not contain credentials. Must be `https://` (plain `http://` is only accepted for `localhost` or with `TESTRAIL_ALLOW_HTTP`). |
 | `TESTRAIL_USERNAME` | yes | TestRail login (email) of the user pestrail acts as. |
 | `TESTRAIL_API_KEY` | yes | API key from **My Settings > API Keys**. Sent only via HTTP Basic auth; never logged, printed, returned or put in URLs. |
 | `TESTRAIL_READ_ONLY` | no | `true` to register only read tools. Default `false`. |
 | `TESTRAIL_ATTACHMENT_ROOTS` | no | Directories that attachments may be uploaded from, separated by `;` on Windows and `:` on macOS/Linux. If unset, any file readable by the server process may be uploaded. |
 | `TESTRAIL_TIMEOUT` | no | HTTP timeout in seconds. Default `30`. |
+| `TESTRAIL_CA_BUNDLE` | no | Path to a PEM file with the CA certificate(s) to trust for TestRail. Only needed if the CA is not installed in your OS certificate store (see [Corporate networks](#corporate-networks-proxies-and-tls)). |
+| `TESTRAIL_ALLOW_HTTP` | no | `true` to allow a plain `http://` URL for a non-local host. **Your API key is then sent unencrypted.** Default `false`. |
 | `PESTRAIL_LOG_LEVEL` | no | `DEBUG`, `INFO`, `WARNING` (default) or `ERROR`. Logs go to stderr only. |
-| `PESTRAIL_ENV_FILE` | no | Path to a `.env` file to load. By default `.env` in the working directory is loaded if present. Real environment variables always take precedence. |
+| `PESTRAIL_ENV_FILE` | no | Path to a `.env` file to load, or `none` to disable `.env` loading. By default the per-user file is loaded if it exists; a `.env` in the working directory is never loaded implicitly (see [.env files](#env-files)). |
 
-If a required variable is missing, pestrail exits immediately with a clear message on stderr,
-which Claude Desktop shows in its MCP logs.
+If a required variable is missing or invalid, pestrail exits immediately with a clear message
+on stderr, which Claude Desktop shows in its MCP logs.
+
+### .env files
+
+The recommended setup is to put the variables in your MCP client config (the `env` block in
+the examples above). No `.env` file is needed.
+
+If you prefer a file, pestrail reads **one per-user `.env` file** from a fixed location:
+
+| OS | Location |
+|---|---|
+| Windows | `%APPDATA%\pestrail\.env` (e.g. `C:\Users\you\AppData\Roaming\pestrail\.env`) |
+| macOS / Linux | `$XDG_CONFIG_HOME/pestrail/.env`, by default `~/.config/pestrail/.env` |
+
+```powershell
+# Windows (PowerShell): create the folder and copy the template
+New-Item -ItemType Directory -Force "$env:APPDATA\pestrail" | Out-Null
+Copy-Item .env.example "$env:APPDATA\pestrail\.env"
+notepad "$env:APPDATA\pestrail\.env"
+```
+
+```bash
+# macOS / Linux
+mkdir -p ~/.config/pestrail && cp .env.example ~/.config/pestrail/.env
+```
+
+A `.env` in the **working directory is never loaded automatically**. MCP clients such as
+Claude Code may start pestrail inside any folder, including a repository you just cloned,
+and that repository's `.env` could otherwise point pestrail at someone else's server. To
+use a specific file anyway, name it explicitly with `PESTRAIL_ENV_FILE`, e.g.
+`PESTRAIL_ENV_FILE=.env` when developing from source.
+
+Whichever file is used, pestrail is strict about it:
+
+- Real environment variables (e.g. from your MCP client config) always win over the file.
+- Only `TESTRAIL_*` and `PESTRAIL_*` keys are read. Anything else, like `HTTPS_PROXY`,
+  `SSL_CERT_FILE` or `PATH`, is ignored with a warning.
+- If `TESTRAIL_API_KEY` comes from the real environment, the file may **not** set
+  `TESTRAIL_URL`, `TESTRAIL_CA_BUNDLE` or `TESTRAIL_ALLOW_HTTP`. pestrail refuses to start
+  instead, because otherwise a `.env` file could decide where your API key is sent.
+
+To ignore `.env` files completely, set `PESTRAIL_ENV_FILE=none` in your MCP client's `env`
+block, next to your other `TESTRAIL_*` variables. Setting it inside a `.env` file has no
+effect.
+
+### Corporate networks: proxies and TLS
+
+- **TLS certificates**: pestrail uses your operating system's certificate store (via
+  [truststore](https://pypi.org/project/truststore/)). If your company inspects TLS traffic
+  or runs TestRail with an internal CA, it usually works as soon as that CA is installed on
+  the machine, which IT normally does. Otherwise point `TESTRAIL_CA_BUNDLE` at the CA
+  certificate (PEM). Certificate verification is never disabled.
+- **Proxies**: the standard `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` environment variables
+  are honored. Set them in the MCP client's `env` block if needed.
+- **Connection problems** are reported with the underlying cause (DNS, TLS, proxy, refused
+  connection) and a hint about what to check.
 
 ### Read-only mode
 
@@ -317,8 +374,12 @@ Point Claude Desktop at your checkout:
 }
 ```
 
-For local development you can copy `.env.example` to `.env` (it is git-ignored) instead of
-passing the variables in the config.
+No `.env` file is needed with this config. For local development without an MCP client, you
+can copy `.env.example` to `.env` in the repo (it is git-ignored) and opt in explicitly:
+
+```powershell
+$env:PESTRAIL_ENV_FILE = ".env"; uv run pestrail
+```
 
 ### Development
 

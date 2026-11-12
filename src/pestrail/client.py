@@ -16,6 +16,7 @@ import asyncio
 import email.utils
 import logging
 import re
+import ssl
 import time
 from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
@@ -151,6 +152,53 @@ def _parse_retry_after(value: str | None) -> float:
     return max(0.0, min(delay, MAX_RETRY_DELAY))
 
 
+def build_ssl_context(config: Config) -> ssl.SSLContext:
+    """TLS context for TestRail requests.
+
+    TESTRAIL_CA_BUNDLE wins if set. Otherwise the operating system's trust store is used
+    (via truststore), so corporate CAs installed on the machine are trusted, which is what
+    users behind TLS-inspecting proxies need. Falls back to certifi if truststore is missing.
+    """
+    if config.ca_bundle is not None:
+        return ssl.create_default_context(cafile=str(config.ca_bundle))
+    try:
+        import truststore
+
+        return truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    except Exception:  # pragma: no cover - truststore unavailable on this platform
+        import certifi
+
+        return ssl.create_default_context(cafile=certifi.where())
+
+
+_MAX_ERROR_DETAIL = 300
+
+
+def describe_network_error(method: str, exc: httpx.HTTPError, secret: str) -> str:
+    """Turn an httpx transport error into an actionable message without leaking secrets."""
+    detail = (str(exc) or type(exc).__name__).strip()
+    if secret:
+        detail = detail.replace(secret, "********")
+    if len(detail) > _MAX_ERROR_DETAIL:
+        detail = detail[:_MAX_ERROR_DETAIL] + "..."
+    lowered = detail.lower()
+    if isinstance(exc, httpx.ProxyError):
+        hint = "Check your proxy settings (HTTPS_PROXY / HTTP_PROXY / NO_PROXY)."
+    elif "certificate" in lowered or "ssl" in lowered or "tls" in lowered:
+        hint = (
+            "TLS certificate verification failed. If your network inspects TLS traffic or "
+            "TestRail uses a private CA, install that CA in the OS certificate store or set "
+            "TESTRAIL_CA_BUNDLE to the CA certificate file (PEM)."
+        )
+    elif "getaddrinfo" in lowered or "name or service" in lowered or "nodename" in lowered:
+        hint = "The host name could not be resolved. Check TESTRAIL_URL and your network/VPN."
+    elif isinstance(exc, httpx.ConnectError):
+        hint = "Check TESTRAIL_URL, your network/VPN and proxy settings."
+    else:
+        hint = "Check your network connection and TESTRAIL_URL."
+    return f"Could not reach TestRail ({method}): {type(exc).__name__}: {detail}. {hint}"
+
+
 def extract_items(data: Any, key: str) -> tuple[list[Any], dict[str, Any]]:
     """Return (items, paging_meta) for both paginated-object and bare-list responses."""
     if isinstance(data, list):
@@ -192,6 +240,7 @@ class TestRailClient:
             timeout=config.timeout,
             headers={"Accept": "application/json", "User-Agent": f"pestrail/{__version__}"},
             follow_redirects=False,
+            verify=build_ssl_context(config),
             transport=transport,
         )
         self._status_cache: list[dict[str, Any]] | None = None
@@ -281,7 +330,7 @@ class TestRailClient:
                 ) from exc
             except httpx.HTTPError as exc:
                 raise TestRailError(
-                    f"Could not reach TestRail ({method}): {type(exc).__name__}"
+                    describe_network_error(method, exc, self._config.api_key.get())
                 ) from exc
 
             if response.status_code == 429 and attempt < self._max_retries:

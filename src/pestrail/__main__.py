@@ -15,19 +15,30 @@ from . import __version__
 
 
 def _load_dotenv() -> None:
-    """Load a .env file from the current directory (or PESTRAIL_ENV_FILE) if present.
+    """Load the per-user .env file, or the one named by PESTRAIL_ENV_FILE.
 
-    Real environment variables always win over values in the file.
+    See config.env_file_location for which file is used (never the working directory's
+    .env implicitly) and config.apply_env_file for the merge rules (real env wins, only
+    TESTRAIL_*/PESTRAIL_* keys, no destination settings from the file when the API key
+    comes from the environment).
     """
-    explicit = os.environ.get("PESTRAIL_ENV_FILE")
-    path = Path(explicit).expanduser() if explicit else Path.cwd() / ".env"
+    from .config import ConfigError, apply_env_file, env_file_location
+
+    path, explicit = env_file_location()
+    if path is None:
+        return
     if not path.is_file():
         if explicit:
-            print(f"pestrail: PESTRAIL_ENV_FILE not found: {path}", file=sys.stderr)
+            raise ConfigError(f"PESTRAIL_ENV_FILE not found: {path}")
         return
-    from dotenv import load_dotenv
+    from dotenv import dotenv_values
 
-    load_dotenv(path, override=False)
+    applied, ignored = apply_env_file(dotenv_values(path), os.environ)
+    log = logging.getLogger("pestrail")
+    if applied:
+        log.info("Loaded %s from %s", ", ".join(sorted(applied)), path)
+    if ignored:
+        log.warning("Ignored non-pestrail keys in %s: %s", path, ", ".join(sorted(ignored)))
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -51,14 +62,22 @@ def main(argv: list[str] | None = None) -> None:
     # httpx logs every request URL at INFO; keep that out of normal logs.
     logging.getLogger("httpx").setLevel(max(logging.WARNING, logging.getLogger().level))
 
-    _load_dotenv()
-
-    from .config import ConfigError, load_config
+    from .config import ConfigError, env_file_location, load_config
 
     try:
+        _load_dotenv()
         config = load_config()
     except ConfigError as exc:
-        print(f"pestrail: configuration error: {exc}", file=sys.stderr)
+        message = f"pestrail: configuration error: {exc}"
+        local_env = Path.cwd() / ".env"
+        if "Missing required" in str(exc) and local_env.is_file():
+            path, _ = env_file_location()
+            message += (
+                f"\npestrail: note: {local_env} exists but is not loaded automatically. "
+                "Set PESTRAIL_ENV_FILE to its path to use it"
+                + (f", or move it to {path}." if path else ".")
+            )
+        print(message, file=sys.stderr)
         sys.exit(2)
 
     from .server import create_server

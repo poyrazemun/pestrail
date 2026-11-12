@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import ipaddress
+import math
 import os
-from collections.abc import Mapping
+import ssl
+from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -11,6 +14,13 @@ from urllib.parse import urlsplit
 DEFAULT_TIMEOUT = 30.0
 _TRUE = {"1", "true", "yes", "on"}
 _FALSE = {"0", "false", "no", "off", ""}
+
+#: Only these keys may be taken from a .env file; anything else (proxies, SSL_CERT_FILE,
+#: PATH, ...) is ignored so a stray .env cannot reconfigure the process.
+ENV_FILE_PREFIXES = ("TESTRAIL_", "PESTRAIL_")
+#: Settings that decide *where* credentials are sent. If the API key comes from the real
+#: environment, these must come from there too, never from a .env file.
+DESTINATION_KEYS = ("TESTRAIL_URL", "TESTRAIL_CA_BUNDLE", "TESTRAIL_ALLOW_HTTP")
 
 
 class ConfigError(Exception):
@@ -48,10 +58,26 @@ class Config:
     read_only: bool = False
     attachment_roots: tuple[Path, ...] = ()
     timeout: float = DEFAULT_TIMEOUT
+    ca_bundle: Path | None = None
 
 
-def normalize_url(raw: str) -> str:
-    """Strip whitespace, trailing slashes and an accidental index.php suffix."""
+def _is_loopback(host: str | None) -> bool:
+    if not host:
+        return False
+    if host.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def normalize_url(raw: str, *, allow_http: bool = False) -> str:
+    """Strip whitespace, trailing slashes and an accidental index.php suffix, and validate.
+
+    Plain http:// is refused (credentials would travel unencrypted) unless the host is
+    loopback or ``allow_http`` is set.
+    """
     url = raw.strip().rstrip("/")
     for suffix in ("/index.php?/api/v2", "/index.php?", "/index.php"):
         if url.lower().endswith(suffix):
@@ -65,6 +91,16 @@ def normalize_url(raw: str) -> str:
         raise ConfigError(
             "TESTRAIL_URL must not contain credentials. "
             "Use TESTRAIL_USERNAME and TESTRAIL_API_KEY instead."
+        )
+    if parts.query or parts.fragment:
+        raise ConfigError(
+            "TESTRAIL_URL must be the base address of your instance, without '?' or '#'."
+        )
+    if parts.scheme == "http" and not allow_http and not _is_loopback(parts.hostname):
+        raise ConfigError(
+            "TESTRAIL_URL uses plain http://, which would send your API key unencrypted. "
+            "Use https://, or set TESTRAIL_ALLOW_HTTP=true if you accept the risk "
+            "(e.g. an isolated lab network)."
         )
     return url
 
@@ -106,9 +142,92 @@ def parse_timeout(raw: str | None) -> float:
         value = float(raw)
     except ValueError as exc:
         raise ConfigError(f"TESTRAIL_TIMEOUT must be a number of seconds, got {raw!r}") from exc
-    if value <= 0:
-        raise ConfigError("TESTRAIL_TIMEOUT must be greater than 0")
+    if not math.isfinite(value) or value <= 0:
+        raise ConfigError("TESTRAIL_TIMEOUT must be a finite number greater than 0")
     return value
+
+
+def parse_ca_bundle(raw: str | None) -> Path | None:
+    """Validate TESTRAIL_CA_BUNDLE: an existing PEM file that OpenSSL can load."""
+    if raw is None or not raw.strip():
+        return None
+    path = Path(raw.strip().strip('"')).expanduser()
+    if not path.is_file():
+        raise ConfigError(f"TESTRAIL_CA_BUNDLE file not found: {raw!r}")
+    try:
+        ssl.create_default_context(cafile=str(path))
+    except (ssl.SSLError, OSError, ValueError) as exc:
+        raise ConfigError(
+            f"TESTRAIL_CA_BUNDLE could not be loaded as PEM certificates: {raw!r}"
+        ) from exc
+    return path.resolve()
+
+
+def user_config_dir(environ: Mapping[str, str] | None = None, *, os_name: str = os.name) -> Path:
+    """Per-user config directory: %APPDATA%\\pestrail on Windows, else
+    $XDG_CONFIG_HOME/pestrail or ~/.config/pestrail."""
+    environ = os.environ if environ is None else environ
+    if os_name == "nt":
+        base = environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
+    else:
+        base = environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    return Path(base) / "pestrail"
+
+
+def env_file_location(
+    environ: Mapping[str, str] | None = None, *, os_name: str = os.name
+) -> tuple[Path | None, bool]:
+    """Which .env file to load, as (path or None, explicitly_requested).
+
+    * PESTRAIL_ENV_FILE=none (or the null device): no file.
+    * PESTRAIL_ENV_FILE=<path>: that file (explicit opt-in, relative paths use the cwd).
+    * Otherwise: the per-user file in user_config_dir(). A .env in the working directory
+      is never loaded implicitly, because MCP clients may start pestrail inside a cloned
+      repository whose .env could point it at someone else's server.
+    """
+    environ = os.environ if environ is None else environ
+    explicit = (environ.get("PESTRAIL_ENV_FILE") or "").strip()
+    if explicit.lower() == "none" or explicit == os.devnull:
+        return None, True
+    if explicit:
+        return Path(explicit).expanduser(), True
+    return user_config_dir(environ, os_name=os_name) / ".env", False
+
+
+def apply_env_file(
+    values: Mapping[str, str | None], environ: MutableMapping[str, str]
+) -> tuple[list[str], list[str]]:
+    """Merge values read from a .env file into ``environ``, safely.
+
+    * Real environment variables always win.
+    * Only TESTRAIL_* / PESTRAIL_* keys are applied; others are ignored.
+    * If TESTRAIL_API_KEY is already in the real environment, the .env file may not
+      supply TESTRAIL_URL / TESTRAIL_CA_BUNDLE / TESTRAIL_ALLOW_HTTP. Otherwise a .env file
+      in a cloned repository could redirect your key to a server of its choosing.
+
+    Returns (applied_keys, ignored_keys). Raises ConfigError on an unsafe mix.
+    """
+    key_in_env = bool((environ.get("TESTRAIL_API_KEY") or "").strip())
+    if key_in_env:
+        unsafe = sorted(k for k in DESTINATION_KEYS if values.get(k) and k not in environ)
+        if unsafe:
+            raise ConfigError(
+                "Refusing to read " + ", ".join(unsafe) + " from a .env file while "
+                "TESTRAIL_API_KEY comes from the environment: that would let a .env file "
+                "decide where your API key is sent. Set these in the same place as the key "
+                "(e.g. your MCP client config), or put the key in the .env file too."
+            )
+    applied: list[str] = []
+    ignored: list[str] = []
+    for key, value in values.items():
+        if value is None or key in environ:
+            continue
+        if not key.startswith(ENV_FILE_PREFIXES) or key == "PESTRAIL_ENV_FILE":
+            ignored.append(key)
+            continue
+        environ[key] = value
+        applied.append(key)
+    return applied, ignored
 
 
 def load_config(env: Mapping[str, str] | None = None) -> Config:
@@ -122,11 +241,13 @@ def load_config(env: Mapping[str, str] | None = None) -> Config:
             + ", ".join(missing)
             + ". See .env.example or the README for setup."
         )
+    allow_http = parse_bool("TESTRAIL_ALLOW_HTTP", env.get("TESTRAIL_ALLOW_HTTP"))
     return Config(
-        url=normalize_url(env["TESTRAIL_URL"]),
+        url=normalize_url(env["TESTRAIL_URL"], allow_http=allow_http),
         username=env["TESTRAIL_USERNAME"].strip(),
         api_key=Secret(env["TESTRAIL_API_KEY"].strip()),
         read_only=parse_bool("TESTRAIL_READ_ONLY", env.get("TESTRAIL_READ_ONLY")),
         attachment_roots=parse_roots(env.get("TESTRAIL_ATTACHMENT_ROOTS")),
         timeout=parse_timeout(env.get("TESTRAIL_TIMEOUT")),
+        ca_bundle=parse_ca_bundle(env.get("TESTRAIL_CA_BUNDLE")),
     )

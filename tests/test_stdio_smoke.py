@@ -26,18 +26,44 @@ DUMMY_ENV = {
 }
 
 
+def clean_env(extra_env: dict[str, str], *, config_home: str | None = None) -> dict[str, str]:
+    """Process env without TESTRAIL_*/PESTRAIL_* vars from the developer's shell.
+
+    Unless ``config_home`` is given, .env loading is disabled, so a developer's real
+    per-user pestrail config is never read by tests.
+    """
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("TESTRAIL_", "PESTRAIL_"))}
+    if config_home is None:
+        env["PESTRAIL_ENV_FILE"] = "none"
+    else:
+        env["APPDATA"] = config_home
+        env["XDG_CONFIG_HOME"] = config_home
+    env["PYTHONUNBUFFERED"] = "1"
+    env.update(extra_env)
+    return env
+
+
+def run_once(env: dict[str, str], cwd: str | None = None) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, "-m", "pestrail"],
+        input="",
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=cwd,
+        timeout=TIMEOUT,
+        check=False,
+    )
+
+
 class StdioServer:
-    def __init__(self, extra_env: dict[str, str]) -> None:
-        env = {k: v for k, v in os.environ.items() if not k.startswith("TESTRAIL_")}
-        env.update(extra_env)
-        env["PYTHONUNBUFFERED"] = "1"
-        env["PESTRAIL_ENV_FILE"] = os.devnull  # never pick up a developer's local .env
+    def __init__(self, extra_env: dict[str, str], *, config_home: str | None = None) -> None:
         self.proc = subprocess.Popen(
             [sys.executable, "-m", "pestrail"],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            env=env,
+            env=clean_env(extra_env, config_home=config_home),
             text=True,
             encoding="utf-8",
         )
@@ -87,8 +113,10 @@ class StdioServer:
                 self.proc.wait()
 
 
-def _session(extra_env: dict[str, str]) -> tuple[StdioServer, dict[str, Any]]:
-    server = StdioServer(extra_env)
+def _session(
+    extra_env: dict[str, str], *, config_home: str | None = None
+) -> tuple[StdioServer, dict[str, Any]]:
+    server = StdioServer(extra_env, config_home=config_home)
     init = server.request(
         "initialize",
         {
@@ -132,18 +160,66 @@ def test_stdio_read_only_mode_hides_write_tools():
         server.close()
 
 
-def test_missing_config_fails_fast_on_stderr():
-    env = {k: v for k, v in os.environ.items() if not k.startswith("TESTRAIL_")}
-    env["PESTRAIL_ENV_FILE"] = os.devnull
-    proc = subprocess.run(
-        [sys.executable, "-m", "pestrail"],
-        input="",
-        capture_output=True,
-        text=True,
-        env=env,
-        timeout=TIMEOUT,
-        check=False,
-    )
+def _write_env(path, values: dict[str, str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("".join(f"{k}={v}\n" for k, v in values.items()), encoding="utf-8")
+
+
+def test_per_user_env_file_is_loaded(tmp_path):
+    config_home = tmp_path / "config"
+    _write_env(config_home / "pestrail" / ".env", {**DUMMY_ENV, "TESTRAIL_READ_ONLY": "true"})
+    server, _ = _session({}, config_home=str(config_home))
+    try:
+        names = {t["name"] for t in server.request("tools/list")["result"]["tools"]}
+        assert len(names) == 29  # read-only came from the per-user file
+    finally:
+        server.close()
+
+
+def test_working_directory_env_file_is_not_loaded(tmp_path):
+    # A cloned repo with its own .env must not configure pestrail implicitly.
+    repo = tmp_path / "cloned-repo"
+    _write_env(repo / ".env", {**DUMMY_ENV, "TESTRAIL_URL": "https://attacker.invalid"})
+    empty_home = tmp_path / "empty-config"
+    empty_home.mkdir()
+    proc = run_once(clean_env({}, config_home=str(empty_home)), cwd=str(repo))
+    assert proc.returncode == 2
+    assert proc.stdout == ""
+    assert "Missing required" in proc.stderr
+    assert "is not loaded automatically" in proc.stderr
+    assert "PESTRAIL_ENV_FILE" in proc.stderr
+
+
+def test_explicit_env_file_is_loaded(tmp_path):
+    env_file = tmp_path / "my.env"
+    _write_env(env_file, {**DUMMY_ENV, "TESTRAIL_READ_ONLY": "true"})
+    server, _ = _session({"PESTRAIL_ENV_FILE": str(env_file)})
+    try:
+        names = {t["name"] for t in server.request("tools/list")["result"]["tools"]}
+        assert len(names) == 29
+    finally:
+        server.close()
+
+
+def test_explicit_env_file_missing_fails(tmp_path):
+    proc = run_once(clean_env({"PESTRAIL_ENV_FILE": str(tmp_path / "nope.env")}))
+    assert proc.returncode == 2
+    assert "PESTRAIL_ENV_FILE not found" in proc.stderr
+
+
+def test_env_file_cannot_redirect_api_key(tmp_path):
+    env_file = tmp_path / ".env"
+    _write_env(env_file, {"TESTRAIL_URL": "https://attacker.invalid"})
+    without_url = {k: v for k, v in DUMMY_ENV.items() if k != "TESTRAIL_URL"}
+    proc = run_once(clean_env({**without_url, "PESTRAIL_ENV_FILE": str(env_file)}))
+    assert proc.returncode == 2
+    assert proc.stdout == ""
+    assert "Refusing to read TESTRAIL_URL from a .env file" in proc.stderr
+    assert "dummy-smoke-key" not in proc.stderr
+
+
+def test_missing_config_fails_fast_on_stderr(tmp_path):
+    proc = run_once(clean_env({}), cwd=str(tmp_path))
     assert proc.returncode == 2
     assert proc.stdout == ""
     assert "TESTRAIL_URL" in proc.stderr

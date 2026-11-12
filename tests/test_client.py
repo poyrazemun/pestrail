@@ -229,6 +229,66 @@ def test_network_error_is_wrapped(client, mock_api):
         run(client.get("get_projects"))
 
 
+def test_ssl_error_has_actionable_hint(client, mock_api):
+    mock_api.get(API + "get_projects").mock(
+        side_effect=httpx.ConnectError(
+            "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local "
+            "issuer certificate"
+        )
+    )
+    with pytest.raises(TestRailError) as info:
+        run(client.get("get_projects"))
+    message = str(info.value)
+    assert "CERTIFICATE_VERIFY_FAILED" in message
+    assert "TESTRAIL_CA_BUNDLE" in message
+
+
+def test_dns_error_hint(client, mock_api):
+    mock_api.get(API + "get_projects").mock(
+        side_effect=httpx.ConnectError("[Errno 11001] getaddrinfo failed")
+    )
+    with pytest.raises(TestRailError, match="could not be resolved"):
+        run(client.get("get_projects"))
+
+
+def test_proxy_error_hint(client, mock_api):
+    mock_api.get(API + "get_projects").mock(side_effect=httpx.ProxyError("407 auth required"))
+    with pytest.raises(TestRailError, match="HTTPS_PROXY"):
+        run(client.get("get_projects"))
+
+
+def test_network_error_redacts_secret_and_truncates(client, mock_api):
+    mock_api.get(API + "get_projects").mock(
+        side_effect=httpx.ConnectError(f"weird failure {FAKE_KEY} " + "x" * 1000)
+    )
+    with pytest.raises(TestRailError) as info:
+        run(client.get("get_projects"))
+    message = str(info.value)
+    assert FAKE_KEY not in message
+    assert "********" in message
+    assert len(message) < 700
+
+
+def test_ssl_context_uses_ca_bundle():
+    import certifi
+
+    from pestrail.client import build_ssl_context
+
+    cfg = make_config()
+    ctx = build_ssl_context(type(cfg)(**{**cfg.__dict__, "ca_bundle": Path(certifi.where())}))
+    assert ctx.verify_mode.name == "CERT_REQUIRED"
+    assert ctx.check_hostname is True
+    assert len(ctx.get_ca_certs()) > 10
+
+
+def test_ssl_context_default_verifies():
+    from pestrail.client import build_ssl_context
+
+    ctx = build_ssl_context(make_config())
+    assert ctx.verify_mode.name == "CERT_REQUIRED"
+    assert ctx.check_hostname is True
+
+
 def test_timeout_is_wrapped(client, mock_api):
     mock_api.get(API + "get_projects").mock(side_effect=httpx.ReadTimeout("slow"))
     with pytest.raises(TestRailError, match="timed out"):
