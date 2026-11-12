@@ -312,3 +312,18 @@ def test_secret_is_never_rendered():
     assert "secret-key" not in repr(cfg.api_key)
     assert "secret-key" not in f"{cfg.api_key}"
     assert Secret("a") == Secret("a")
+    assert Secret("a") != Secret("b")
+    assert hash(cfg)  # Config remains hashable despite unhashable Secret
+
+
+def test_username_hidden_from_config_repr():
+    cfg = load_config(BASE_ENV)
+    assert "qa@example.invalid" not in repr(cfg)
+    assert cfg.username == "qa@example.invalid"
+
+
+def test_timeout_upper_bound():
+    with pytest.raises(ConfigError, match="at most"):
+        load_config({**BASE_ENV, "TESTRAIL_TIMEOUT": "601"})
+    with pytest.raises(ConfigError, match="at most"):
+        load_config({**BASE_ENV, "TESTRAIL_UPLOAD_TIMEOUT": "3601"})

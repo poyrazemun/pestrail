@@ -143,18 +143,20 @@ def pick(
     return out
 
 
-def with_status(obj: dict[str, Any], labels: Mapping[int, str]) -> dict[str, Any]:
-    status_id = obj.get("status_id")
+def with_status(obj: Mapping[str, Any], labels: Mapping[int, str]) -> dict[str, Any]:
+    out = dict(obj)
+    status_id = out.get("status_id")
     if status_id is not None and status_id in labels:
-        obj["status"] = labels[status_id]
-    return obj
+        out["status"] = labels[status_id]
+    return out
 
 
-def truncate_comment(obj: dict[str, Any], limit: int = LIST_COMMENT_LIMIT) -> dict[str, Any]:
-    comment = obj.get("comment")
+def truncate_comment(obj: Mapping[str, Any], limit: int = LIST_COMMENT_LIMIT) -> dict[str, Any]:
+    out = dict(obj)
+    comment = out.get("comment")
     if isinstance(comment, str) and len(comment) > limit:
-        obj["comment"] = comment[:limit] + f"... [truncated, {len(comment)} chars total]"
-    return obj
+        out["comment"] = comment[:limit] + f"... [truncated, {len(comment)} chars total]"
+    return out
 
 
 def full(obj: Mapping[str, Any]) -> dict[str, Any]:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 import ipaddress
 import math
 import os
@@ -13,6 +14,8 @@ from urllib.parse import urlsplit
 
 DEFAULT_TIMEOUT = 30.0
 DEFAULT_UPLOAD_TIMEOUT = 300.0
+MAX_TIMEOUT = 600.0
+MAX_UPLOAD_TIMEOUT = 3600.0
 _TRUE = {"1", "true", "yes", "on"}
 _FALSE = {"0", "false", "no", "off", ""}
 
@@ -45,17 +48,18 @@ class Secret:
     __str__ = __repr__
 
     def __eq__(self, other: object) -> bool:
-        return isinstance(other, Secret) and other._value == self._value
+        if not isinstance(other, Secret):
+            return NotImplemented
+        return hmac.compare_digest(self._value, other._value)
 
-    def __hash__(self) -> int:
-        return hash(self._value)
+    __hash__ = None  # type: ignore[assignment]
 
 
 @dataclass(frozen=True)
 class Config:
     url: str
-    username: str
-    api_key: Secret = field(repr=False)
+    username: str = field(repr=False)
+    api_key: Secret = field(repr=False, hash=False)
     read_only: bool = False
     attachment_roots: tuple[Path, ...] = ()
     #: When True and attachment_roots is empty, any readable file may be uploaded.
@@ -145,7 +149,11 @@ def parse_roots(raw: str | None) -> tuple[Path, ...]:
 
 
 def parse_timeout(
-    raw: str | None, name: str = "TESTRAIL_TIMEOUT", default: float = DEFAULT_TIMEOUT
+    raw: str | None,
+    name: str = "TESTRAIL_TIMEOUT",
+    default: float = DEFAULT_TIMEOUT,
+    *,
+    max_value: float = MAX_TIMEOUT,
 ) -> float:
     if raw is None or not raw.strip():
         return default
@@ -155,6 +163,8 @@ def parse_timeout(
         raise ConfigError(f"{name} must be a number of seconds, got {raw!r}") from exc
     if not math.isfinite(value) or value <= 0:
         raise ConfigError(f"{name} must be a finite number greater than 0")
+    if value > max_value:
+        raise ConfigError(f"{name} must be at most {max_value:g} seconds, got {value:g}")
     return value
 
 
@@ -292,9 +302,12 @@ def load_config(env: Mapping[str, str] | None = None) -> Config:
         allowed_run_ids=parse_allowed_ids(
             env.get("TESTRAIL_ALLOWED_RUN_IDS"), "run", "TESTRAIL_ALLOWED_RUN_IDS"
         ),
-        timeout=parse_timeout(env.get("TESTRAIL_TIMEOUT")),
+        timeout=parse_timeout(env.get("TESTRAIL_TIMEOUT"), max_value=MAX_TIMEOUT),
         ca_bundle=parse_ca_bundle(env.get("TESTRAIL_CA_BUNDLE")),
         upload_timeout=parse_timeout(
-            env.get("TESTRAIL_UPLOAD_TIMEOUT"), "TESTRAIL_UPLOAD_TIMEOUT", DEFAULT_UPLOAD_TIMEOUT
+            env.get("TESTRAIL_UPLOAD_TIMEOUT"),
+            "TESTRAIL_UPLOAD_TIMEOUT",
+            DEFAULT_UPLOAD_TIMEOUT,
+            max_value=MAX_UPLOAD_TIMEOUT,
         ),
     )

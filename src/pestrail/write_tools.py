@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
-from typing import Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -18,6 +18,9 @@ from .client import TestRailError
 from .ids import parse_id, resolve_status
 from .read_tools import CaseId, PlanId, RunId, TestId
 from .scope import enforce_write_scope
+
+if TYPE_CHECKING:
+    from .server import Registry
 
 MAX_BULK_RESULTS = 500
 MAX_FILES_PER_CALL = 20
@@ -192,7 +195,7 @@ def _result_summary(result: dict[str, Any], labels: dict[int, str]) -> dict[str,
     )
 
 
-def register(reg: Any) -> None:
+def register(reg: Registry) -> None:
     client = reg.client
     roots = reg.config.attachment_roots
     allow_any_path = reg.config.allow_any_attachment_path
@@ -215,7 +218,7 @@ def register(reg: Any) -> None:
     async def _scope(**kwargs: Any) -> None:
         await enforce_write_scope(client, reg.config, **kwargs)
 
-    async def _upload(method: str, *ids: int | str, file_path: str) -> dict[str, Any]:
+    async def _upload(method: str, *ids: int | str, file_path: str) -> dict:
         resolved = await _check_file(file_path)
         data = await client.upload(method, *ids, file_path=resolved)
         size_bytes = await asyncio.to_thread(lambda: resolved.stat().st_size)

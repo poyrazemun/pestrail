@@ -1,14 +1,20 @@
 """Read-only MCP tools. These are always registered."""
 
+import re
 from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
 from pydantic import Field
 
 from . import shaping as sh
 from .client import TestRailError
 from .ids import parse_id, parse_id_list, parse_optional_id, resolve_status_filter
+
+if TYPE_CHECKING:
+    from .server import Registry
+
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 # --------------------------------------------------------------------------- parameter types
 
@@ -126,7 +132,7 @@ def to_timestamp(value: int | str | None) -> int | None:
 
 
 async def list_page(
-    reg: Any,
+    reg: "Registry",
     method: str,
     *path_args: int,
     key: str,
@@ -181,7 +187,7 @@ async def list_page(
     return {key: [shape(i) for i in items], "paging": paging}
 
 
-def register(reg: Any) -> None:
+def register(reg: "Registry") -> None:
     client = reg.client
 
     # ------------------------------------------------------------------ projects / suites
@@ -724,8 +730,11 @@ def register(reg: Any) -> None:
         offset: Offset = 0,
         fetch_all: Annotated[
             bool,
-            Field(description="If true (default), return all users up to max_items."),
-        ] = True,
+            Field(
+                description="If true, follow pagination and return all users up to max_items. "
+                "Default false (one page); prefer get_user_by_email for a single person."
+            ),
+        ] = False,
         max_items: MaxItems = 1000,
     ) -> dict:
         """List users (id, name, email). Use a user's id as assigned_to_id in result tools.
@@ -750,10 +759,11 @@ def register(reg: Any) -> None:
         email: Annotated[str, Field(description="The user's email address.")],
     ) -> dict:
         """Look up a single user by email address (to get the ID for assigned_to_id)."""
-        if "@" not in email:
+        cleaned = email.strip()
+        if not _EMAIL_RE.fullmatch(cleaned) or len(cleaned) > 254:
             raise TestRailError(f"{email!r} is not an email address.")
         return sh.pick(
-            await client.get("get_user_by_email", params={"email": email.strip()}), sh.USER_FIELDS
+            await client.get("get_user_by_email", params={"email": cleaned}), sh.USER_FIELDS
         )
 
     @reg.read

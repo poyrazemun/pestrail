@@ -299,7 +299,7 @@ def test_get_users_follows_pagination(mock_api):
     route = mock_api.get(url__startswith=API + "get_users/3").mock(
         side_effect=[httpx.Response(200, json=page1), httpx.Response(200, json=page2)]
     )
-    out = call(build(), "get_users", {"project_id": "P3"})
+    out = call(build(), "get_users", {"project_id": "P3", "fetch_all": True})
     assert [u["id"] for u in out["users"]] == [1, 2]
     assert out["count"] == 2
     assert str(route.calls[1].request.url).endswith("get_users/3&offset=1")
