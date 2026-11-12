@@ -58,6 +58,9 @@ class Config:
     api_key: Secret = field(repr=False)
     read_only: bool = False
     attachment_roots: tuple[Path, ...] = ()
+    #: When True and attachment_roots is empty, any readable file may be uploaded.
+    #: Must be set explicitly; write mode refuses to start with neither roots nor this flag.
+    allow_any_attachment_path: bool = False
     timeout: float = DEFAULT_TIMEOUT
     ca_bundle: Path | None = None
     upload_timeout: float = DEFAULT_UPLOAD_TIMEOUT
@@ -246,12 +249,25 @@ def load_config(env: Mapping[str, str] | None = None) -> Config:
             + ". See .env.example or the README for setup."
         )
     allow_http = parse_bool("TESTRAIL_ALLOW_HTTP", env.get("TESTRAIL_ALLOW_HTTP"))
+    read_only = parse_bool("TESTRAIL_READ_ONLY", env.get("TESTRAIL_READ_ONLY"))
+    attachment_roots = parse_roots(env.get("TESTRAIL_ATTACHMENT_ROOTS"))
+    allow_any_attachment_path = parse_bool(
+        "TESTRAIL_ALLOW_ANY_ATTACHMENT_PATH", env.get("TESTRAIL_ALLOW_ANY_ATTACHMENT_PATH")
+    )
+    if not read_only and not attachment_roots and not allow_any_attachment_path:
+        raise ConfigError(
+            "TESTRAIL_ATTACHMENT_ROOTS is required when write tools are enabled, so an "
+            "assistant cannot upload arbitrary files (e.g. SSH keys) to TestRail. "
+            "Set it to your test-artifact directories, use TESTRAIL_READ_ONLY=true, or set "
+            "TESTRAIL_ALLOW_ANY_ATTACHMENT_PATH=true if you accept the risk."
+        )
     return Config(
         url=normalize_url(env["TESTRAIL_URL"], allow_http=allow_http),
         username=env["TESTRAIL_USERNAME"].strip(),
         api_key=Secret(env["TESTRAIL_API_KEY"].strip()),
-        read_only=parse_bool("TESTRAIL_READ_ONLY", env.get("TESTRAIL_READ_ONLY")),
-        attachment_roots=parse_roots(env.get("TESTRAIL_ATTACHMENT_ROOTS")),
+        read_only=read_only,
+        attachment_roots=attachment_roots,
+        allow_any_attachment_path=allow_any_attachment_path,
         timeout=parse_timeout(env.get("TESTRAIL_TIMEOUT")),
         ca_bundle=parse_ca_bundle(env.get("TESTRAIL_CA_BUNDLE")),
         upload_timeout=parse_timeout(

@@ -243,7 +243,8 @@ use `/mcp` inside Claude Code.
 | `TESTRAIL_USERNAME` | yes | TestRail login (email) of the user pestrail acts as. |
 | `TESTRAIL_API_KEY` | yes | API key from **My Settings > API Keys**. Sent only via HTTP Basic auth; never logged, printed, returned or put in URLs. |
 | `TESTRAIL_READ_ONLY` | no | `true` to register only read tools. Default `false`. |
-| `TESTRAIL_ATTACHMENT_ROOTS` | no | Directories that attachments may be uploaded from, separated by `;` on Windows and `:` on macOS/Linux. If unset, any file readable by the server process may be uploaded. |
+| `TESTRAIL_ATTACHMENT_ROOTS` | write mode | Directories that attachments may be uploaded from, separated by `;` on Windows and `:` on macOS/Linux. **Required when write tools are enabled**, unless `TESTRAIL_ALLOW_ANY_ATTACHMENT_PATH=true`. Not required in read-only mode. |
+| `TESTRAIL_ALLOW_ANY_ATTACHMENT_PATH` | no | `true` to allow uploading any readable file when `TESTRAIL_ATTACHMENT_ROOTS` is unset. **Your assistant could then exfiltrate secrets** (e.g. `~/.ssh/id_rsa`) to TestRail. Default `false`. |
 | `TESTRAIL_TIMEOUT` | no | HTTP timeout in seconds. Default `30`. |
 | `TESTRAIL_UPLOAD_TIMEOUT` | no | Timeout in seconds for sending an attachment and waiting for TestRail to process it. Default `300`. Raise it for very large files or slow links. |
 | `TESTRAIL_CA_BUNDLE` | no | Path to a PEM file with the CA certificate(s) to trust for TestRail. Only needed if the CA is not installed in your OS certificate store (see [Corporate networks](#corporate-networks-proxies-and-tls)). |
@@ -317,21 +318,19 @@ setup with people who should only browse.
 
 ### Restricting attachment uploads
 
-Attachment tools read files **from the machine running pestrail**. To stop an assistant from
-uploading arbitrary files (e.g. `~/.ssh/id_rsa`), set `TESTRAIL_ATTACHMENT_ROOTS` to the
-directories that hold your test artifacts. pestrail then:
+Attachment tools read files **from the machine running pestrail**. In write mode, pestrail
+**refuses to start** unless you set `TESTRAIL_ATTACHMENT_ROOTS` (or explicitly opt in with
+`TESTRAIL_ALLOW_ANY_ATTACHMENT_PATH=true`). That stops an assistant from uploading arbitrary
+files such as `~/.ssh/id_rsa` by default. With roots configured, pestrail:
 
 - resolves the requested path fully (following symlinks and `..`) **before** checking it, so
   a symlink inside an allowed directory that points outside it is rejected;
 - resolves **relative paths** (e.g. `logs/run-42.log`) against the attachment roots, in
   order, never against the server's working directory (MCP clients start servers in
-  unpredictable folders). Without `TESTRAIL_ATTACHMENT_ROOTS`, relative paths are rejected
-  and absolute paths are required;
+  unpredictable folders). Relative paths are always rejected when roots are unset;
 - only accepts regular files that exist, and rejects anything over TestRail's **256 MB** limit;
 - in `add_result_with_attachments`, checks all files **before** creating the result, so a bad
   path creates nothing.
-
-Setting `TESTRAIL_ATTACHMENT_ROOTS` is strongly recommended.
 
 ---
 

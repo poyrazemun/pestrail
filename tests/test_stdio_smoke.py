@@ -23,6 +23,8 @@ DUMMY_ENV = {
     "TESTRAIL_URL": "https://testrail.invalid",
     "TESTRAIL_USERNAME": "smoke@example.invalid",
     "TESTRAIL_API_KEY": "dummy-smoke-key",
+    # Write-mode startup requires roots or this explicit opt-in.
+    "TESTRAIL_ALLOW_ANY_ATTACHMENT_PATH": "true",
 }
 
 

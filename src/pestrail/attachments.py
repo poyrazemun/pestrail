@@ -16,7 +16,11 @@ class AttachmentError(TestRailError):
 
 
 def validate_attachment_path(
-    raw_path: str, roots: Sequence[Path], *, max_bytes: int = MAX_ATTACHMENT_BYTES
+    raw_path: str,
+    roots: Sequence[Path],
+    *,
+    max_bytes: int = MAX_ATTACHMENT_BYTES,
+    allow_any_path: bool = False,
 ) -> Path:
     """Resolve ``raw_path`` and check it is an existing, allowed, not-too-large regular file.
 
@@ -26,12 +30,18 @@ def validate_attachment_path(
       set unpredictably. Without roots, relative paths are rejected.
     * Symlinks and ``..`` are resolved *before* the root check, so a link inside a root that
       points outside it is rejected.
-    * If ``roots`` is empty, any readable file is allowed.
+    * If ``roots`` is empty, uploads are refused unless ``allow_any_path`` is set (explicit
+      opt-in to uploading any readable file).
     """
     if not raw_path or not str(raw_path).strip():
         raise AttachmentError("A file path is required.")
     if "\x00" in raw_path:
         raise AttachmentError("Invalid file path.")
+    if not roots and not allow_any_path:
+        raise AttachmentError(
+            "Uploads require TESTRAIL_ATTACHMENT_ROOTS (or "
+            "TESTRAIL_ALLOW_ANY_ATTACHMENT_PATH=true to allow any readable file)."
+        )
 
     candidate = Path(str(raw_path).strip().strip('"')).expanduser()
     if not candidate.is_absolute():

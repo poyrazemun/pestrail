@@ -57,8 +57,9 @@ FilePath = Annotated[
     str,
     Field(
         description="Absolute path to a local file on the machine running this server, "
-        "max 256 MB. Uploads may be restricted to TESTRAIL_ATTACHMENT_ROOTS; relative paths "
-        "are resolved against those roots and rejected if no roots are configured."
+        "max 256 MB. Uploads are limited to TESTRAIL_ATTACHMENT_ROOTS (relative paths are "
+        "resolved against those roots). Only with TESTRAIL_ALLOW_ANY_ATTACHMENT_PATH may "
+        "any absolute readable path be used."
     ),
 ]
 
@@ -133,6 +134,7 @@ def _result_summary(result: dict[str, Any], labels: dict[int, str]) -> dict[str,
 def register(reg: Any) -> None:
     client = reg.client
     roots = reg.config.attachment_roots
+    allow_any_path = reg.config.allow_any_attachment_path
 
     async def _statuses_if(status: Any) -> list[dict[str, Any]]:
         if status is None or status == "":
@@ -141,7 +143,7 @@ def register(reg: Any) -> None:
         return await client.get_statuses()
 
     def _check_file(path: str) -> Path:
-        return validate_attachment_path(path, roots)
+        return validate_attachment_path(path, roots, allow_any_path=allow_any_path)
 
     async def _upload(method: str, *ids: int | str, file_path: str) -> dict[str, Any]:
         resolved = _check_file(file_path)

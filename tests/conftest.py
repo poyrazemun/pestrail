@@ -18,14 +18,23 @@ FAKE_KEY = "fake-api-key-DO-NOT-LEAK-123"
 
 
 def make_config(
-    *, read_only: bool = False, roots: tuple[Path, ...] = (), timeout: float = 5.0
+    *,
+    read_only: bool = False,
+    roots: tuple[Path, ...] = (),
+    allow_any_attachment_path: bool | None = None,
+    timeout: float = 5.0,
 ) -> Config:
+    # Tests that exercise uploads without roots opt into the explicit escape hatch,
+    # matching production's fail-closed default unless roots are provided.
+    if allow_any_attachment_path is None:
+        allow_any_attachment_path = not roots and not read_only
     return Config(
         url=FAKE_URL,
         username="qa@example.invalid",
         api_key=Secret(FAKE_KEY),
         read_only=read_only,
         attachment_roots=roots,
+        allow_any_attachment_path=allow_any_attachment_path,
         timeout=timeout,
     )
 

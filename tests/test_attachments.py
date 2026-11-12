@@ -61,9 +61,17 @@ def test_symlink_escape_rejected(layout):
         validate_attachment_path(str(link), [root])
 
 
-def test_no_roots_allows_any_file(layout):
+def test_no_roots_refuses_without_opt_in(layout):
     _, _, outside, _ = layout
-    assert validate_attachment_path(str(outside), []) == outside.resolve()
+    with pytest.raises(AttachmentError, match="TESTRAIL_ATTACHMENT_ROOTS"):
+        validate_attachment_path(str(outside), [])
+
+
+def test_no_roots_allows_any_file_with_opt_in(layout):
+    _, _, outside, _ = layout
+    assert (
+        validate_attachment_path(str(outside), [], allow_any_path=True) == outside.resolve()
+    )
 
 
 def test_relative_path_resolved_against_roots(layout, tmp_path):
@@ -79,7 +87,7 @@ def test_relative_path_without_roots_rejected(tmp_path, monkeypatch):
     (tmp_path / "here.txt").write_text("x", encoding="utf-8")
     monkeypatch.chdir(tmp_path)  # even if the file exists in the cwd
     with pytest.raises(AttachmentError, match="absolute path"):
-        validate_attachment_path("here.txt", [])
+        validate_attachment_path("here.txt", [], allow_any_path=True)
 
 
 def test_relative_path_cannot_escape_root(layout):
@@ -96,7 +104,7 @@ def test_relative_path_not_found_lists_roots(layout):
 
 def test_missing_file(tmp_path):
     with pytest.raises(AttachmentError, match="not found"):
-        validate_attachment_path(str(tmp_path / "missing.log"), [])
+        validate_attachment_path(str(tmp_path / "missing.log"), [], allow_any_path=True)
 
 
 def test_directory_rejected(layout):
@@ -113,9 +121,9 @@ def test_size_limit(layout):
 
 def test_empty_and_null_byte():
     with pytest.raises(AttachmentError):
-        validate_attachment_path("", [])
+        validate_attachment_path("", [], allow_any_path=True)
     with pytest.raises(AttachmentError):
-        validate_attachment_path("a\x00b", [])
+        validate_attachment_path("a\x00b", [], allow_any_path=True)
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows paths are case-insensitive")

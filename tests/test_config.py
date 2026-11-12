@@ -19,17 +19,46 @@ BASE_ENV = {
     "TESTRAIL_URL": "https://testrail.invalid/",
     "TESTRAIL_USERNAME": "qa@example.invalid",
     "TESTRAIL_API_KEY": "secret-key",
+    # Most unit tests opt into unrestricted uploads; fail-closed startup is covered separately.
+    "TESTRAIL_ALLOW_ANY_ATTACHMENT_PATH": "true",
 }
 
 
-def test_loads_required_and_defaults():
-    cfg = load_config(BASE_ENV)
+def test_loads_required_and_defaults(tmp_path: Path):
+    root = tmp_path / "artifacts"
+    root.mkdir()
+    env = {
+        k: v for k, v in BASE_ENV.items() if k != "TESTRAIL_ALLOW_ANY_ATTACHMENT_PATH"
+    }
+    cfg = load_config({**env, "TESTRAIL_ATTACHMENT_ROOTS": str(root)})
     assert cfg.url == "https://testrail.invalid"
     assert cfg.username == "qa@example.invalid"
     assert cfg.api_key.get() == "secret-key"
     assert cfg.read_only is False
-    assert cfg.attachment_roots == ()
+    assert cfg.attachment_roots == (root.resolve(),)
+    assert cfg.allow_any_attachment_path is False
     assert cfg.timeout == 30.0
+
+
+def test_write_mode_requires_attachment_roots_or_opt_in():
+    env = {k: v for k, v in BASE_ENV.items() if k != "TESTRAIL_ALLOW_ANY_ATTACHMENT_PATH"}
+    with pytest.raises(ConfigError, match="TESTRAIL_ATTACHMENT_ROOTS is required"):
+        load_config(env)
+
+
+def test_write_mode_allows_explicit_any_path_opt_in():
+    env = {k: v for k, v in BASE_ENV.items() if k != "TESTRAIL_ALLOW_ANY_ATTACHMENT_PATH"}
+    cfg = load_config({**env, "TESTRAIL_ALLOW_ANY_ATTACHMENT_PATH": "true"})
+    assert cfg.attachment_roots == ()
+    assert cfg.allow_any_attachment_path is True
+
+
+def test_read_only_does_not_require_attachment_roots():
+    env = {k: v for k, v in BASE_ENV.items() if k != "TESTRAIL_ALLOW_ANY_ATTACHMENT_PATH"}
+    cfg = load_config({**env, "TESTRAIL_READ_ONLY": "true"})
+    assert cfg.read_only is True
+    assert cfg.attachment_roots == ()
+    assert cfg.allow_any_attachment_path is False
 
 
 @pytest.mark.parametrize("missing", ["TESTRAIL_URL", "TESTRAIL_USERNAME", "TESTRAIL_API_KEY"])
