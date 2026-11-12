@@ -69,9 +69,7 @@ def test_no_roots_refuses_without_opt_in(layout):
 
 def test_no_roots_allows_any_file_with_opt_in(layout):
     _, _, outside, _ = layout
-    assert (
-        validate_attachment_path(str(outside), [], allow_any_path=True) == outside.resolve()
-    )
+    assert validate_attachment_path(str(outside), [], allow_any_path=True) == outside.resolve()
 
 
 def test_relative_path_resolved_against_roots(layout, tmp_path):

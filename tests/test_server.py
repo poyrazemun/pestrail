@@ -453,7 +453,7 @@ def test_bulk_results_rejects_length_mismatch(mock_api, statuses):
     mock_api.post(API + "add_results_for_cases/56").mock(
         return_value=httpx.Response(200, json=[{"id": 1, "test_id": 11, "status_id": 1}])
     )
-    with pytest.raises(ToolError, match="returned 1 results but 2 were sent"):
+    with pytest.raises(ToolError, match=r"returned 1 results for 2 entries.*Do NOT retry"):
         asyncio.run(
             build().call_tool(
                 "add_results_for_cases",

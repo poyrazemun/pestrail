@@ -28,9 +28,7 @@ BASE_ENV = {
 def test_loads_required_and_defaults(tmp_path: Path):
     root = tmp_path / "artifacts"
     root.mkdir()
-    env = {
-        k: v for k, v in BASE_ENV.items() if k != "TESTRAIL_ALLOW_ANY_ATTACHMENT_PATH"
-    }
+    env = {k: v for k, v in BASE_ENV.items() if k != "TESTRAIL_ALLOW_ANY_ATTACHMENT_PATH"}
     cfg = load_config({**env, "TESTRAIL_ATTACHMENT_ROOTS": str(root)})
     assert cfg.url == "https://testrail.invalid"
     assert cfg.username == "qa@example.invalid"
@@ -313,6 +311,9 @@ def test_secret_is_never_rendered():
     assert "secret-key" not in f"{cfg.api_key}"
     assert Secret("a") == Secret("a")
     assert Secret("a") != Secret("b")
+    # Non-ASCII secrets (TestRail also accepts passwords) must compare, not raise.
+    assert Secret("şifre-ğüı") == Secret("şifre-ğüı")
+    assert Secret("şifre-ğüı") != Secret("sifre-gui")
     assert hash(cfg)  # Config remains hashable despite unhashable Secret
 
 

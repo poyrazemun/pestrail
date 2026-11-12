@@ -53,7 +53,6 @@ READ_METHODS: frozenset[str] = frozenset(
         "get_tests",
         "get_test",
         "get_results",
-        "get_result",
         "get_results_for_case",
         "get_results_for_run",
         "get_attachments_for_case",
@@ -239,12 +238,14 @@ class TestRailClient:
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         max_retries: int = MAX_RETRIES_429,
         max_total_wait: float = MAX_TOTAL_RETRY_WAIT,
+        max_response_bytes: int = MAX_RESPONSE_BYTES,
     ) -> None:
         self._config = config
         self._base = f"{config.url}/index.php?/api/v2/"
         self._sleep = sleep
         self._max_retries = max_retries
         self._max_total_wait = max_total_wait
+        self._max_response_bytes = max_response_bytes
         # Uploads of large files need more time to send and for TestRail to process,
         # but connecting should fail as fast as any other request.
         self._upload_timeout = httpx.Timeout(config.upload_timeout, connect=config.timeout)
@@ -331,22 +332,25 @@ class TestRailClient:
             data = await asyncio.to_thread(file_path.read_bytes)
             upload_parts = (file_path.name, data)
         while True:
+            if upload_parts is not None:
+                name, data = upload_parts
+                request = self._http.build_request(
+                    "POST",
+                    url,
+                    files={"attachment": (name, data)},
+                    timeout=self._upload_timeout,
+                )
+            elif http_method == "POST":
+                request = self._http.build_request(
+                    "POST",
+                    url,
+                    json=json_body if json_body is not None else {},
+                    headers={"Content-Type": "application/json"},
+                )
+            else:
+                request = self._http.build_request("GET", url)
             try:
-                if upload_parts is not None:
-                    name, data = upload_parts
-                    response = await self._http.post(
-                        url,
-                        files={"attachment": (name, data)},
-                        timeout=self._upload_timeout,
-                    )
-                elif http_method == "POST":
-                    response = await self._http.post(
-                        url,
-                        json=json_body if json_body is not None else {},
-                        headers={"Content-Type": "application/json"},
-                    )
-                else:
-                    response = await self._http.get(url)
+                response = await self._send_capped(method, request)
             except httpx.TimeoutException as exc:
                 if file_path is not None:
                     raise TestRailError(
@@ -383,16 +387,49 @@ class TestRailClient:
         logger.debug("%s %s -> %d", http_method, method, response.status_code)
         return self._handle_response(method, response)
 
+    async def _send_capped(self, method: str, request: httpx.Request) -> httpx.Response:
+        """Send ``request`` and read the body with a hard byte limit.
+
+        The body is streamed and reading stops as soon as MAX_RESPONSE_BYTES is exceeded,
+        so an oversized (or hostile) response never sits in memory in full. A declared
+        Content-Length over the limit is rejected before any body is read.
+        """
+        response = await self._http.send(request, stream=True)
+        try:
+            declared = response.headers.get("Content-Length", "")
+            if declared.isdigit() and int(declared) > self._max_response_bytes:
+                raise self._too_large(method, response.status_code, int(declared))
+            chunks: list[bytes] = []
+            size = 0
+            async for chunk in response.aiter_bytes():
+                size += len(chunk)
+                if size > self._max_response_bytes:
+                    raise self._too_large(method, response.status_code, size)
+                chunks.append(chunk)
+        finally:
+            await response.aclose()
+        # Rebuild a plain, fully-read response. aiter_bytes() already decoded any
+        # Content-Encoding, so drop the encoding/length headers to avoid decoding twice.
+        headers = [
+            (k, v)
+            for k, v in response.headers.multi_items()
+            if k.lower() not in ("content-encoding", "content-length", "transfer-encoding")
+        ]
+        return httpx.Response(
+            response.status_code, headers=headers, content=b"".join(chunks), request=request
+        )
+
+    def _too_large(self, method: str, status: int, size: int) -> TestRailError:
+        return TestRailError(
+            f"TestRail response for {method} is too large (over {self._max_response_bytes} "
+            f"bytes, got at least {size}). Narrow the filters or lower limit/max_items.",
+            status,
+        )
+
     @staticmethod
     def _handle_response(method: str, response: httpx.Response) -> Any:
         status = response.status_code
         content = response.content
-        if len(content) > MAX_RESPONSE_BYTES:
-            raise TestRailError(
-                f"TestRail response for {method} is too large ({len(content)} bytes; "
-                f"limit {MAX_RESPONSE_BYTES}). Narrow filters or lower max_items.",
-                status,
-            )
         if 200 <= status < 300:
             if not content:
                 return None
@@ -416,6 +453,9 @@ class TestRailClient:
                 "(use the exact https:// address of your instance)."
             )
         hint = _STATUS_HINTS.get(status, "")
+        if status in (400, 404) and "unknown method" in message.lower():
+            # Not a bad ID: this TestRail version simply lacks the API method.
+            hint = "This TestRail version does not support this API method."
         if status == 429 and response.headers.get("Retry-After"):
             wait = _parse_retry_after(response.headers.get("Retry-After"))
             hint = f"{hint} TestRail asked to wait {wait:.0f}s before retrying."

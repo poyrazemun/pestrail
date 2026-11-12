@@ -15,7 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from . import shaping as sh
 from .attachments import MAX_ATTACHMENT_BYTES, validate_attachment_path
 from .client import TestRailError
-from .ids import parse_id, resolve_status
+from .ids import parse_id, parse_optional_id, resolve_status
 from .read_tools import CaseId, PlanId, RunId, TestId
 from .scope import enforce_write_scope
 
@@ -24,6 +24,8 @@ if TYPE_CHECKING:
 
 MAX_BULK_RESULTS = 500
 MAX_FILES_PER_CALL = 20
+#: How many result_id -> run_id pairs to remember for scope checks on later attachments.
+MAX_REMEMBERED_RESULTS = 10_000
 MAX_COMMENT_CHARS = 20_000
 MAX_VERSION_CHARS = 250
 MAX_ELAPSED_CHARS = 64
@@ -47,8 +49,7 @@ Comment = Annotated[
     Field(
         max_length=MAX_COMMENT_CHARS,
         description=(
-            f"Result comment (max {MAX_COMMENT_CHARS} chars). "
-            "Markdown is supported by TestRail."
+            f"Result comment (max {MAX_COMMENT_CHARS} chars). Markdown is supported by TestRail."
         ),
     ),
 ]
@@ -215,8 +216,24 @@ def register(reg: Registry) -> None:
             allow_any_path=allow_any_path,
         )
 
-    async def _scope(**kwargs: Any) -> None:
-        await enforce_write_scope(client, reg.config, **kwargs)
+    # result_id -> run_id for results this server created. TestRail has no single-result
+    # lookup, so this is how add_attachment_to_result can be scope-checked without extra
+    # input in the common "add a result, then attach a log" flow. Bounded, oldest dropped.
+    known_result_runs: dict[int, int] = {}
+
+    def _remember(result: Any, run: int | None) -> None:
+        if run is None or not isinstance(result, dict):
+            return
+        result_id = result.get("id")
+        if isinstance(result_id, int) and result_id > 0:
+            known_result_runs[result_id] = run
+            while len(known_result_runs) > MAX_REMEMBERED_RESULTS:
+                known_result_runs.pop(next(iter(known_result_runs)))
+
+    async def _scope(**kwargs: Any) -> int | None:
+        return await enforce_write_scope(
+            client, reg.config, known_result_runs=known_result_runs, **kwargs
+        )
 
     async def _upload(method: str, *ids: int | str, file_path: str) -> dict:
         resolved = await _check_file(file_path)
@@ -248,7 +265,7 @@ def register(reg: Registry) -> None:
         removed through this server, so double-check the IDs. Fails if the run is closed.
         """
         tid = parse_id(test_id, "test")
-        await _scope(test_id=tid)
+        run = await _scope(test_id=tid)
         body = build_result_body(
             status=status,
             comment=comment,
@@ -260,6 +277,7 @@ def register(reg: Registry) -> None:
             statuses=await _statuses_if(status),
         )
         result = await client.post("add_result", tid, body=body)
+        _remember(result, run)
         return _result_summary(result or {}, await reg.status_labels())
 
     @reg.write
@@ -293,6 +311,7 @@ def register(reg: Registry) -> None:
             statuses=await _statuses_if(status),
         )
         result = await client.post("add_result_for_case", rid, cid, body=body)
+        _remember(result, rid)
         out = _result_summary(result or {}, await reg.status_labels())
         out["case_id"] = cid
         return out
@@ -342,17 +361,27 @@ def register(reg: Registry) -> None:
             raise TestRailError("Nothing was sent. Fix these entries:\n" + "\n".join(errors))
 
         created = await client.post("add_results_for_cases", rid, body={"results": payload})
+        # From here on TestRail has accepted the request: the results exist. Any error must
+        # say so, or the assistant may "retry" and add every result a second time.
+        do_not_retry = (
+            f"TestRail accepted the request, so the {len(payload)} results WERE added to run "
+            f"{rid}. Do NOT retry this call (it would add duplicates); check them with "
+            "get_results_for_run instead."
+        )
         if not isinstance(created, list):
             raise TestRailError(
-                "Unexpected response from add_results_for_cases: expected a list of results."
+                "Unexpected response from add_results_for_cases (expected a list of results). "
+                + do_not_retry
             )
         if len(created) != len(payload):
             raise TestRailError(
-                f"TestRail returned {len(created)} results but {len(payload)} were sent."
+                f"TestRail returned {len(created)} results for {len(payload)} entries sent. "
+                + do_not_retry
             )
         labels = await reg.status_labels()
         summaries = []
         for sent, result in zip(payload, created, strict=True):
+            _remember(result, rid)
             summary = _result_summary(result, labels)
             summary["case_id"] = sent["case_id"]
             summaries.append(summary)
@@ -369,9 +398,20 @@ def register(reg: Registry) -> None:
             ),
         ],
         file_path: FilePath,
+        test_id: Annotated[
+            int | str | None,
+            Field(
+                description="The test the result belongs to (e.g. 678 or 'T678'). Only needed "
+                "when write allowlists are configured and the result was not created by this "
+                "server in the current session; it is verified against get_results(test_id)."
+            ),
+        ] = None,
     ) -> dict:
-        """Upload a local file (log, screenshot, report) and attach it to an existing result."""
-        await _scope(result_id=result_id)
+        """Upload a local file (log, screenshot, report) and attach it to an existing result.
+
+        Result IDs come from the add_result* tools or get_results / get_results_for_run.
+        """
+        await _scope(result_id=result_id, test_id=parse_optional_id(test_id, "test"))
         return await _upload("add_attachment_to_result", result_id, file_path=file_path)
 
     @reg.write
@@ -468,6 +508,7 @@ def register(reg: Registry) -> None:
 
         result = await client.post("add_result_for_case", rid, cid, body=body) or {}
         result_id = result.get("id")
+        _remember(result, rid)
         if not isinstance(result_id, int) or result_id <= 0:
             raise TestRailError(
                 "Result was created but TestRail returned no usable result id; "

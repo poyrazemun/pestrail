@@ -50,7 +50,9 @@ class Secret:
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Secret):
             return NotImplemented
-        return hmac.compare_digest(self._value, other._value)
+        # Compare bytes: compare_digest() raises TypeError for non-ASCII str values
+        # (TestRail also accepts a password, which may contain any characters).
+        return hmac.compare_digest(self._value.encode("utf-8"), other._value.encode("utf-8"))
 
     __hash__ = None  # type: ignore[assignment]
 

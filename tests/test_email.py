@@ -28,9 +28,7 @@ def test_invalid_email_rejected(mock_api, email):
 
 def test_valid_email_accepted(mock_api):
     mock_api.get(url__startswith=API + "get_user_by_email").mock(
-        return_value=httpx.Response(
-            200, json={"id": 7, "name": "A", "email": "a@example.invalid"}
-        )
+        return_value=httpx.Response(200, json={"id": 7, "name": "A", "email": "a@example.invalid"})
     )
     config = make_config()
     server = create_server(config, TestRailClient(config, sleep=_no_sleep))

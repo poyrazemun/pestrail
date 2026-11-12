@@ -558,6 +558,68 @@ def test_response_body_too_large(client, mock_api):
         run(client.get("get_projects"))
 
 
+class _CountingStream(httpx.AsyncByteStream):
+    """Streams ``total`` bytes in chunks and records how much was actually consumed."""
+
+    def __init__(self, total: int, chunk: int = 1024) -> None:
+        self.total, self.chunk, self.sent = total, chunk, 0
+
+    async def __aiter__(self):
+        while self.sent < self.total:
+            n = min(self.chunk, self.total - self.sent)
+            self.sent += n
+            yield b"y" * n
+
+
+def test_oversized_stream_is_not_read_in_full(mock_api):
+    # No Content-Length (chunked): reading must stop right after the cap is crossed.
+    stream = _CountingStream(total=1_000_000)
+    mock_api.get(API + "get_projects").mock(return_value=httpx.Response(200, stream=stream))
+    c = TestRailClient(make_config(), sleep=_no_sleep, max_response_bytes=10_000)
+    with pytest.raises(TestRailError, match="too large"):
+        run(c.get("get_projects"))
+    assert stream.sent <= 10_000 + 1024  # never more than one chunk past the cap
+
+
+def test_declared_content_length_rejected_before_reading(mock_api):
+    stream = _CountingStream(total=50_000)
+    mock_api.get(API + "get_projects").mock(
+        return_value=httpx.Response(200, headers={"Content-Length": "50000"}, stream=stream)
+    )
+    c = TestRailClient(make_config(), sleep=_no_sleep, max_response_bytes=10_000)
+    with pytest.raises(TestRailError, match="too large"):
+        run(c.get("get_projects"))
+    assert stream.sent == 0
+
+
+def test_gzip_response_is_decoded_once(client, mock_api):
+    import gzip
+    import json as _json
+
+    body = gzip.compress(_json.dumps([{"id": 1, "name": "Ödeme"}]).encode())
+    mock_api.get(API + "get_projects").mock(
+        return_value=httpx.Response(200, headers={"Content-Encoding": "gzip"}, content=body)
+    )
+    assert run(client.get("get_projects")) == [{"id": 1, "name": "Ödeme"}]
+
+
+def test_unknown_method_hint_is_not_about_ids(client, mock_api):
+    mock_api.get(API + "get_case/1").mock(
+        return_value=httpx.Response(404, json={"error": "Unknown method 'get_case'"})
+    )
+    with pytest.raises(TestRailError) as info:
+        run(client.get("get_case", 1))
+    message = str(info.value)
+    assert "does not support this API method" in message
+    assert "Check the ID" not in message
+
+
+def test_get_result_is_not_allowlisted():
+    # TestRail has no single-result endpoint (verified against a live instance:
+    # "Unknown method 'get_result'"), so it must not be relied upon anywhere.
+    assert "get_result" not in ALLOWED_METHODS
+
+
 # ----------------------------------------------------------------- secrecy
 
 
