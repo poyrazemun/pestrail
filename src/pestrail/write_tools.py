@@ -3,6 +3,9 @@
 Nothing here deletes, edits or closes anything; every call only *adds* data.
 """
 
+from __future__ import annotations
+
+import json
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -17,6 +20,13 @@ from .scope import enforce_write_scope
 
 MAX_BULK_RESULTS = 500
 MAX_FILES_PER_CALL = 20
+MAX_COMMENT_CHARS = 20_000
+MAX_VERSION_CHARS = 250
+MAX_ELAPSED_CHARS = 64
+MAX_DEFECTS_CHARS = 2_000
+MAX_CUSTOM_FIELDS = 50
+MAX_CUSTOM_KEY_CHARS = 64
+MAX_CUSTOM_VALUE_CHARS = 10_000
 
 # --------------------------------------------------------------------------- parameter types
 
@@ -29,18 +39,36 @@ Status = Annotated[
     ),
 ]
 Comment = Annotated[
-    str | None, Field(description="Result comment. Markdown is supported by TestRail.")
+    str | None,
+    Field(
+        max_length=MAX_COMMENT_CHARS,
+        description=(
+            f"Result comment (max {MAX_COMMENT_CHARS} chars). "
+            "Markdown is supported by TestRail."
+        ),
+    ),
 ]
 Elapsed = Annotated[
     str | None,
-    Field(description="Time spent, TestRail timespan format, e.g. '30s', '1m 30s', '2h'."),
+    Field(
+        max_length=MAX_ELAPSED_CHARS,
+        description="Time spent, TestRail timespan format, e.g. '30s', '1m 30s', '2h'.",
+    ),
 ]
 Defects = Annotated[
     str | list[str] | None,
-    Field(description="Defect ID(s) to link, e.g. 'JIRA-123' or ['JIRA-1', 'JIRA-2']."),
+    Field(
+        description="Defect ID(s) to link, e.g. 'JIRA-123' or ['JIRA-1', 'JIRA-2'] "
+        f"(max {MAX_DEFECTS_CHARS} chars when joined)."
+    ),
 ]
 Version = Annotated[
-    str | None, Field(description="Version or build tested, e.g. '2.4.1' or a commit SHA.")
+    str | None,
+    Field(
+        max_length=MAX_VERSION_CHARS,
+        description=f"Version or build tested (max {MAX_VERSION_CHARS} chars), "
+        "e.g. '2.4.1' or a commit SHA.",
+    ),
 ]
 AssignedTo = Annotated[
     int | None,
@@ -50,7 +78,8 @@ CustomFields = Annotated[
     dict[str, Any] | None,
     Field(
         description="Custom result fields keyed by system name, e.g. "
-        "{'custom_environment': 'staging'}. Keys must start with 'custom_'. "
+        f"{{'custom_environment': 'staging'}}. Keys must start with 'custom_'; "
+        f"at most {MAX_CUSTOM_FIELDS} fields, values max {MAX_CUSTOM_VALUE_CHARS} chars. "
         "Discover them with get_result_fields."
     ),
 ]
@@ -80,6 +109,24 @@ class CaseResult(BaseModel):
     custom_fields: CustomFields = None
 
 
+def _reject_if_too_long(value: str, name: str, limit: int) -> str:
+    if len(value) > limit:
+        raise TestRailError(f"{name} exceeds {limit} characters ({len(value)} given).")
+    return value
+
+
+def _custom_value_chars(value: Any) -> int:
+    if isinstance(value, str):
+        return len(value)
+    if isinstance(value, (bytes, bytearray)):
+        return len(value)
+    try:
+        return len(json.dumps(value, ensure_ascii=False, default=str))
+    except (TypeError, ValueError) as exc:
+        kind = type(value).__name__
+        raise TestRailError(f"Custom field value could not be measured: {kind}.") from exc
+
+
 def build_result_body(
     *,
     status: int | str | None,
@@ -91,30 +138,42 @@ def build_result_body(
     custom_fields: dict[str, Any] | None,
     statuses: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    """Build a TestRail result payload, validating status and custom field keys."""
+    """Build a TestRail result payload, validating status, sizes and custom field keys."""
     body: dict[str, Any] = {}
     if status is not None and status != "":
         body["status_id"] = resolve_status(status, statuses)
     if comment:
-        body["comment"] = comment
+        body["comment"] = _reject_if_too_long(comment, "comment", MAX_COMMENT_CHARS)
     if elapsed and elapsed.strip():
-        body["elapsed"] = elapsed.strip()
+        body["elapsed"] = _reject_if_too_long(elapsed.strip(), "elapsed", MAX_ELAPSED_CHARS)
     if defects:
         items = [defects] if isinstance(defects, str) else list(defects)
         joined = ",".join(d.strip() for d in items if d and d.strip())
         if joined:
-            body["defects"] = joined
+            body["defects"] = _reject_if_too_long(joined, "defects", MAX_DEFECTS_CHARS)
     if version:
-        body["version"] = version
+        body["version"] = _reject_if_too_long(version, "version", MAX_VERSION_CHARS)
     if assigned_to_id is not None:
         if assigned_to_id <= 0:
             raise TestRailError("assigned_to_id must be a positive user ID.")
         body["assignedto_id"] = assigned_to_id
-    for key, value in (custom_fields or {}).items():
+    fields = custom_fields or {}
+    if len(fields) > MAX_CUSTOM_FIELDS:
+        raise TestRailError(f"At most {MAX_CUSTOM_FIELDS} custom fields are allowed.")
+    for key, value in fields.items():
         if not key.startswith("custom_") or key == "custom_":
             raise TestRailError(
                 f"Custom field key {key!r} must be a system name starting with 'custom_' "
                 "(see get_result_fields)."
+            )
+        if len(key) > MAX_CUSTOM_KEY_CHARS:
+            raise TestRailError(
+                f"Custom field key {key!r} exceeds {MAX_CUSTOM_KEY_CHARS} characters."
+            )
+        size = _custom_value_chars(value)
+        if size > MAX_CUSTOM_VALUE_CHARS:
+            raise TestRailError(
+                f"Custom field {key!r} exceeds {MAX_CUSTOM_VALUE_CHARS} characters ({size} given)."
             )
         body[key] = value
     if not body:
