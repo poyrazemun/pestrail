@@ -1,11 +1,12 @@
 # Changelog
 
-## 0.2.0 (unreleased)
+## 0.2.0 (2026-11-17)
 
 Readable results: comments pasted from Word/Jira/the web were unreadable, and large result
 lists could exceed the MCP client's size limit.
 
 ### Changed
+
 - Result comments stored as rich-text HTML are converted to readable Markdown (paragraphs,
   line breaks, lists, headings, bold/italic, code, links, table rows) **before** being cut.
   Previously the raw HTML was cut at 1,000 characters, often before the first real word.
@@ -21,12 +22,14 @@ lists could exceed the MCP client's size limit.
 - `custom_*` result fields stored as HTML are converted the same way (not truncated).
 
 ### Added
+
 - `get_results`, `get_results_for_case`, `get_results_for_run`: `include_comments`,
   `comment_max_chars` (100–50,000), `full_comment`, `comment_format` (`markdown` / `raw`).
 - `get_results`: `result_id` to return a single result (TestRail has no single-result API,
   so it is looked up within the test's results).
 
 ### Security
+
 - HTML conversion is bounded against hostile comments: nested links and whitespace in
   table cells no longer cause quadratic slowdowns, list indentation is capped so nesting
   can't multiply the output, and at most 500,000 characters of HTML are converted.
@@ -37,6 +40,7 @@ lists could exceed the MCP client's size limit.
   (e.g. a live log) can't be loaded into memory past TestRail's limit.
 
 ### Fixed
+
 - The `get_results_for_run` description said `get_results` returns full comments; it did not.
 - uv now rebuilds the project's metadata when `__init__.py` (the version source) changes.
 - Very long numbers or Unicode digits in IDs, dates, statuses or a `Content-Length` header
@@ -48,12 +52,15 @@ lists could exceed the MCP client's size limit.
   to `max_items` and discarding most of it.
 
 ### Internal
+
 - Removed unused code (`to_compact_json`, `truncate_comment`, a redundant wrapper).
 - Source files are ASCII-only (escapes for invisible characters); CI actions are pinned to
   commit SHAs.
 
 ## 0.1.1
+
 - PyPI page refreshed with the current README. No code changes.
 
 ## 0.1.0
+
 - First public release.
