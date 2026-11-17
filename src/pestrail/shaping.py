@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
+
+from .text import html_to_markdown, looks_like_html
 
 PROJECT_FIELDS = ("id", "name", "suite_mode", "is_completed", "url")
 SUITE_FIELDS = ("id", "name", "description", "project_id", "is_master", "is_completed", "url")
@@ -111,7 +113,12 @@ ATTACHMENT_FIELDS = (
 )
 
 TIMESTAMP_FIELDS = {"created_on", "updated_on", "completed_on", "due_on", "start_on"}
+#: Former fixed limit for raw comments (pre-0.2); still the default of truncate_comment().
 LIST_COMMENT_LIMIT = 1000
+#: Default length of a *cleaned* comment in results tools (comment_max_chars).
+DEFAULT_COMMENT_CHARS = 2000
+
+CommentFormat = Literal["markdown", "raw"]
 
 
 def iso(ts: Any) -> Any:
@@ -152,11 +159,67 @@ def with_status(obj: Mapping[str, Any], labels: Mapping[int, str]) -> dict[str, 
 
 
 def truncate_comment(obj: Mapping[str, Any], limit: int = LIST_COMMENT_LIMIT) -> dict[str, Any]:
+    """Cut a raw comment to ``limit`` characters (kept for compatibility; see shape_comment)."""
     out = dict(obj)
     comment = out.get("comment")
     if isinstance(comment, str) and len(comment) > limit:
         out["comment"] = comment[:limit] + f"... [truncated, {len(comment)} chars total]"
     return out
+
+
+def clean_text(value: Any) -> Any:
+    """Convert rich-text HTML to Markdown; leave plain text, Markdown and non-strings alone."""
+    if isinstance(value, str) and looks_like_html(value):
+        return html_to_markdown(value)
+    return value
+
+
+def shape_comment(
+    value: Any,
+    *,
+    max_chars: int = DEFAULT_COMMENT_CHARS,
+    full: bool = False,
+    fmt: CommentFormat = "markdown",
+) -> Any:
+    """Prepare a result comment for the assistant: clean first, then truncate.
+
+    Cleaning before cutting matters: pasted rich text can spend 1,000+ characters on
+    inline CSS before the first real word. The truncation marker reports the length of
+    the text the assistant would actually get in full (cleaned length in markdown mode).
+    """
+    if not isinstance(value, str):
+        return value
+    text = clean_text(value) if fmt == "markdown" else value
+    if full or len(text) <= max_chars:
+        return text
+    return text[:max_chars] + f"... [truncated, {len(text)} chars total]"
+
+
+def result_shape(
+    labels: Mapping[int, str],
+    *,
+    include_comments: bool = True,
+    comment_max_chars: int = DEFAULT_COMMENT_CHARS,
+    full_comment: bool = False,
+    comment_format: CommentFormat = "markdown",
+) -> Callable[[Mapping[str, Any]], dict[str, Any]]:
+    """Build the per-result shaping function used by the results tools."""
+
+    def shape(result: Mapping[str, Any]) -> dict[str, Any]:
+        out = with_status(pick(result, RESULT_FIELDS, include_custom=True), labels)
+        if not include_comments:
+            out.pop("comment", None)
+        elif "comment" in out:
+            out["comment"] = shape_comment(
+                out["comment"], max_chars=comment_max_chars, full=full_comment, fmt=comment_format
+            )
+        if comment_format == "markdown":
+            for key, value in out.items():
+                if key.startswith("custom_"):
+                    out[key] = clean_text(value)
+        return out
+
+    return shape
 
 
 def full(obj: Mapping[str, Any]) -> dict[str, Any]:

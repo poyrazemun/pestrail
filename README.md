@@ -23,7 +23,9 @@ attachments. See [docs/safety.md](https://github.com/poyrazemun/pestrail/blob/ma
   `_plan` / `_plan_entry`.
 
 IDs can be plain numbers or TestRail-style (`C1234`, `R56`, `T678`), and statuses can be
-given by name (`"Failed"`, custom statuses too).
+given by name (`"Failed"`, custom statuses too). Result comments written in the rich-text
+editor or pasted from Word/Jira come back as readable Markdown, and large responses are
+paged to fit your MCP client's limits.
 
 ## Quick start
 

@@ -112,8 +112,9 @@ def test_tool_output_is_compact_json(mock_api):
     )
     result = asyncio.run(build().call_tool("get_projects", {}))
     text = result.content[0].text
-    assert "\n" not in text
+    # Compact JSON with one list item per line (readable in parts when saved to a file).
     assert ": " not in text and ", " not in text
+    assert '{"id":1,"name":"Ödeme Sistemi","suite_mode":1,"url":"u"}' in text.splitlines()
     assert "Ödeme Sistemi" in text  # non-ASCII kept readable, not \u-escaped
     assert json.loads(text)["projects"][0]["id"] == 1
 
@@ -334,7 +335,8 @@ def test_results_comments_truncated_and_custom_kept(mock_api, statuses):
     assert result["status"] == "Passed"
     assert result["custom_env"] == "staging"
     assert "custom_empty" not in result
-    assert len(result["comment"]) < 1100
+    # Default comment_max_chars is 2000 (was a fixed 1000 before 0.2.0).
+    assert result["comment"] == "x" * 2000 + "... [truncated, 5000 chars total]"
 
 
 # ----------------------------------------------------------------- write tools

@@ -3,13 +3,14 @@
 import re
 from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from pydantic import Field
 
 from . import shaping as sh
 from .client import TestRailError
 from .ids import parse_id, parse_id_list, parse_optional_id, resolve_status_filter
+from .serialize import compact
 
 if TYPE_CHECKING:
     from .server import Registry
@@ -84,6 +85,36 @@ DateFilter = Annotated[
     Field(description="Date as 'YYYY-MM-DD', ISO-8601 datetime, or unix timestamp (UTC)."),
 ]
 OptBool = Annotated[bool | None, Field(description="Omit for no filter.")]
+IncludeComments = Annotated[
+    bool,
+    Field(description="Include result comments (default true). False gives a compact overview."),
+]
+CommentMaxChars = Annotated[
+    int,
+    Field(
+        ge=100,
+        le=50_000,
+        description="Cut each comment after this many characters of cleaned text "
+        "(default 2000); a '[truncated, N chars total]' marker shows the full length.",
+    ),
+]
+FullComment = Annotated[
+    bool,
+    Field(description="Return comments in full, ignoring comment_max_chars (default false)."),
+]
+CommentFormatParam = Annotated[
+    Literal["markdown", "raw"],
+    Field(
+        description="'markdown' (default): rich-text HTML is converted to readable Markdown "
+        "(styles and tags removed). 'raw': the comment exactly as stored in TestRail."
+    ),
+]
+
+#: Most results scanned when looking up one result by id within a test (get_results).
+RESULT_LOOKUP_MAX = 1000
+RESULTS_BUDGET_HINT = (
+    "To fit more per call, use include_comments=false or a smaller comment_max_chars."
+)
 
 FIELD_TYPES = {
     1: "String",
@@ -131,6 +162,32 @@ def to_timestamp(value: int | str | None) -> int | None:
     return ts
 
 
+#: Characters reserved for the response envelope (key names, paging block, notes).
+_ENVELOPE_CHARS = 600
+
+
+def fit_to_budget(items: list[dict[str, Any]], budget: int) -> int:
+    """How many leading items fit in ``budget`` characters of serialized output.
+
+    At least one item is always kept (a single oversized item is still returned), so
+    paging can never get stuck.
+    """
+    used = _ENVELOPE_CHARS
+    for count, item in enumerate(items):
+        used += len(compact(item)) + 2  # item plus ",\n" separator
+        if used > budget and count > 0:
+            return count
+    return len(items)
+
+
+def _budget_note(kept: int, budget: int, next_offset: int, hint: str) -> str:
+    note = (
+        f"Response cut to {kept} items to stay within the output size budget "
+        f"({budget} characters). Continue with offset={next_offset}."
+    )
+    return f"{note} {hint}" if hint else note
+
+
 async def list_page(
     reg: "Registry",
     method: str,
@@ -142,10 +199,17 @@ async def list_page(
     offset: int = 0,
     fetch_all: bool = False,
     max_items: int = 1000,
+    budget_hint: str = "",
 ) -> dict[str, Any]:
-    """Fetch a list endpoint (one page or all pages) and return a compact, shaped payload."""
+    """Fetch a list endpoint (one page or all pages) and return a compact, shaped payload.
+
+    Every response is kept within ``config.max_output_chars``: items that would push it
+    past the budget are left out and ``paging.next_offset`` points at the first one, so
+    MCP clients never reject a result as too large and nothing is skipped.
+    """
     params = {k: v for k, v in (params or {}).items() if v is not None}
     client = reg.client
+    budget = reg.config.max_output_chars
 
     if fetch_all:
         if limit:
@@ -155,13 +219,25 @@ async def list_page(
         items, truncated = await client.get_all(
             method, *path_args, key=key, params=params, max_items=max_items
         )
-        out: dict[str, Any] = {key: [shape(i) for i in items], "count": len(items)}
-        if truncated:
+        shaped = [shape(i) for i in items]
+        kept = fit_to_budget(shaped, budget)
+        cut_by_budget = kept < len(shaped)
+        shaped = shaped[:kept]
+        more = truncated or cut_by_budget
+        out: dict[str, Any] = {key: shaped, "count": len(shaped)}
+        all_paging: dict[str, Any] = {"offset": offset, "returned": len(shaped), "has_more": more}
+        if more:
+            next_offset = offset + len(shaped)
             out["truncated"] = True
-            out["note"] = (
-                f"Stopped at max_items={max_items}. Narrow the filters, raise max_items, "
-                f"or page with offset={offset + len(items)}."
-            )
+            all_paging["next_offset"] = next_offset
+            if cut_by_budget:
+                out["note"] = _budget_note(kept, budget, next_offset, budget_hint)
+            else:
+                out["note"] = (
+                    f"Stopped at max_items={max_items}. Narrow the filters, raise max_items, "
+                    f"or page with offset={next_offset}."
+                )
+        out["paging"] = all_paging
         return out
 
     if limit:
@@ -180,11 +256,20 @@ async def list_page(
     else:
         has_more = bool(meta.get("has_more"))
 
-    paging: dict[str, Any] = {"offset": offset, "returned": len(items), "has_more": has_more}
+    shaped = [shape(i) for i in items]
+    kept = fit_to_budget(shaped, budget)
+    cut_by_budget = kept < len(shaped)
+    if cut_by_budget:
+        shaped = shaped[:kept]
+        has_more = True
+
+    paging: dict[str, Any] = {"offset": offset, "returned": len(shaped), "has_more": has_more}
     if has_more:
-        paging["next_offset"] = offset + len(items)
+        paging["next_offset"] = offset + len(shaped)
         paging["hint"] = "Call again with offset=next_offset, or use fetch_all=true."
-    return {key: [shape(i) for i in items], "paging": paging}
+    if cut_by_budget:
+        paging["note"] = _budget_note(kept, budget, paging["next_offset"], budget_hint)
+    return {key: shaped, "paging": paging}
 
 
 def register(reg: "Registry") -> None:
@@ -560,16 +645,24 @@ def register(reg: "Registry") -> None:
 
     # ------------------------------------------------------------------ results
 
-    def _result_shape(labels: dict[int, str]) -> Callable[[dict[str, Any]], dict[str, Any]]:
-        def shape(r: dict[str, Any]) -> dict[str, Any]:
-            out = sh.pick(r, sh.RESULT_FIELDS, include_custom=True)
-            return sh.truncate_comment(sh.with_status(out, labels))
-
-        return shape
-
     DefectsFilter = Annotated[
         str | None, Field(description="Only results linked to this defect ID, e.g. 'JIRA-123'.")
     ]
+
+    def _result_shape(
+        labels: dict[int, str],
+        include_comments: bool,
+        comment_max_chars: int,
+        full_comment: bool,
+        comment_format: sh.CommentFormat,
+    ) -> Callable[[dict[str, Any]], dict[str, Any]]:
+        return sh.result_shape(
+            labels,
+            include_comments=include_comments,
+            comment_max_chars=comment_max_chars,
+            full_comment=full_comment,
+            comment_format=comment_format,
+        )
 
     @reg.read
     async def get_results(
@@ -578,22 +671,65 @@ def register(reg: "Registry") -> None:
         defects_filter: DefectsFilter = None,
         limit: Limit = None,
         offset: Offset = 0,
+        include_comments: IncludeComments = True,
+        comment_max_chars: CommentMaxChars = sh.DEFAULT_COMMENT_CHARS,
+        full_comment: FullComment = False,
+        comment_format: CommentFormatParam = "markdown",
+        result_id: Annotated[
+            int | str | None,
+            Field(
+                description="Return only this result (from get_results_for_run or an add_result* "
+                "tool). TestRail has no single-result API, so it is looked up in this test's "
+                "results. Combine with full_comment=true to read one comment in full."
+            ),
+        ] = None,
     ) -> dict:
-        """List results (newest first) for a test in a run. Use get_tests to find test IDs."""
+        """List results (newest first) for a test in a run. Use get_tests to find test IDs.
+
+        Comments are converted from rich-text HTML to readable Markdown and cut at
+        comment_max_chars (default 2000) with a '[truncated, N chars total]' marker; use
+        full_comment=true for the whole text. Set include_comments=false for a quick overview.
+        """
+        tid = parse_id(test_id, "test")
         statuses = await client.get_statuses() if status else []
         labels = await reg.status_labels()
+        shape = _result_shape(
+            labels, include_comments, comment_max_chars, full_comment, comment_format
+        )
+        params = {
+            "status_id": resolve_status_filter(status, statuses),
+            "defects_filter": defects_filter,
+        }
+        if result_id is not None and result_id != "":
+            rid = parse_id(result_id, "result")
+            found, _ = await client.get_all(
+                "get_results",
+                tid,
+                key="results",
+                params={k: v for k, v in params.items() if v is not None},
+                max_items=RESULT_LOOKUP_MAX,
+            )
+            match = [shape(r) for r in found if isinstance(r, dict) and r.get("id") == rid]
+            out: dict[str, Any] = {
+                "results": match,
+                "paging": {"offset": 0, "returned": len(match), "has_more": False},
+            }
+            if not match:
+                out["note"] = (
+                    f"Result {rid} was not found among the results of test {tid}. "
+                    "Check the IDs with get_results_for_run or get_results(test_id)."
+                )
+            return out
         return await list_page(
             reg,
             "get_results",
-            parse_id(test_id, "test"),
+            tid,
             key="results",
-            shape=_result_shape(labels),
-            params={
-                "status_id": resolve_status_filter(status, statuses),
-                "defects_filter": defects_filter,
-            },
+            shape=shape,
+            params=params,
             limit=limit,
             offset=offset,
+            budget_hint=RESULTS_BUDGET_HINT,
         )
 
     @reg.read
@@ -604,8 +740,16 @@ def register(reg: "Registry") -> None:
         defects_filter: DefectsFilter = None,
         limit: Limit = None,
         offset: Offset = 0,
+        include_comments: IncludeComments = True,
+        comment_max_chars: CommentMaxChars = sh.DEFAULT_COMMENT_CHARS,
+        full_comment: FullComment = False,
+        comment_format: CommentFormatParam = "markdown",
     ) -> dict:
-        """List results (newest first) for a case within a specific run."""
+        """List results (newest first) for a case within a specific run.
+
+        Comments are converted to readable Markdown and cut at comment_max_chars; see
+        get_results for the comment options.
+        """
         statuses = await client.get_statuses() if status else []
         labels = await reg.status_labels()
         return await list_page(
@@ -614,13 +758,16 @@ def register(reg: "Registry") -> None:
             parse_id(run_id, "run"),
             parse_id(case_id, "case"),
             key="results",
-            shape=_result_shape(labels),
+            shape=_result_shape(
+                labels, include_comments, comment_max_chars, full_comment, comment_format
+            ),
             params={
                 "status_id": resolve_status_filter(status, statuses),
                 "defects_filter": defects_filter,
             },
             limit=limit,
             offset=offset,
+            budget_hint=RESULTS_BUDGET_HINT,
         )
 
     @reg.read
@@ -635,9 +782,18 @@ def register(reg: "Registry") -> None:
         offset: Offset = 0,
         fetch_all: FetchAll = False,
         max_items: MaxItems = 1000,
+        include_comments: IncludeComments = True,
+        comment_max_chars: CommentMaxChars = sh.DEFAULT_COMMENT_CHARS,
+        full_comment: FullComment = False,
+        comment_format: CommentFormatParam = "markdown",
     ) -> dict:
-        """List all results added in a run (newest first). Comments are truncated in lists;
-        use get_results(test_id) for a single test's full history."""
+        """List all results added in a run (newest first).
+
+        Comments are converted to readable Markdown and cut at comment_max_chars. Large
+        responses are cut to fit the output size budget; continue with paging.next_offset.
+        For an overview of a big run, use include_comments=false. To read one comment in
+        full, use get_results(test_id, result_id=..., full_comment=true).
+        """
         statuses = await client.get_statuses() if status else []
         labels = await reg.status_labels()
         params = {
@@ -652,12 +808,15 @@ def register(reg: "Registry") -> None:
             "get_results_for_run",
             parse_id(run_id, "run"),
             key="results",
-            shape=_result_shape(labels),
+            shape=_result_shape(
+                labels, include_comments, comment_max_chars, full_comment, comment_format
+            ),
             params=params,
             limit=limit,
             offset=offset,
             fetch_all=fetch_all,
             max_items=max_items,
+            budget_hint=RESULTS_BUDGET_HINT,
         )
 
     # ------------------------------------------------------------------ attachments

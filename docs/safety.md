@@ -51,6 +51,8 @@ Files are read from the machine running pestrail. pestrail:
 | Attachment size | 256 MB |
 | `fetch_all` | 1,000 items by default, `max_items` up to 5,000 |
 | TestRail response size | 20 MB (refused while streaming, never fully loaded) |
+| Tool response size | 40,000 characters per list response by default (`PESTRAIL_MAX_OUTPUT_CHARS`); larger pages continue via `paging.next_offset` |
+| Result comments | Rich-text HTML converted to Markdown, then cut at 2,000 characters by default (`comment_max_chars`, up to 50,000, or `full_comment=true`) |
 | Rate limiting (HTTP 429) | Follows `Retry-After`: up to 3 retries and 30 s in total. A longer requested wait fails right away and says how long. |
 
 ## Known limitations

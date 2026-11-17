@@ -50,6 +50,11 @@ build-backend = "hatchling.build"
 [tool.hatch.version]
 path = "src/pestrail/__init__.py"
 
+[tool.uv]
+# The version is read from __init__.py (dynamic), so uv must rebuild the project's
+# metadata when that file changes, not only when pyproject.toml does.
+cache-keys = [{ file = "pyproject.toml" }, { file = "src/pestrail/__init__.py" }]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/pestrail"]
 
