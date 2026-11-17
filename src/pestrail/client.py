@@ -98,6 +98,9 @@ DEFAULT_RETRY_DELAY = 5.0
 DEFAULT_MAX_ITEMS = 1000
 #: How long get_statuses() may reuse a cached list before refetching.
 STATUS_CACHE_TTL = 300.0
+#: TestRail's maximum attachment size. Enforced again while reading the file, because
+#: a file (e.g. a log still being written) can grow after it was validated.
+MAX_UPLOAD_BYTES = 256 * 1024 * 1024
 #: Refuse to parse JSON bodies larger than this (protects memory / MCP context).
 MAX_RESPONSE_BYTES = 20 * 1024 * 1024
 
@@ -158,6 +161,18 @@ def _parse_retry_after(value: str | None) -> float:
         except (TypeError, ValueError):
             delay = DEFAULT_RETRY_DELAY
     return max(0.0, min(delay, MAX_RETRY_DELAY))
+
+
+def read_upload(path: Path, limit: int) -> bytes:
+    """Read a file for upload, never holding more than ``limit`` + 1 bytes in memory."""
+    with path.open("rb") as fh:
+        data = fh.read(limit + 1)
+    if len(data) > limit:
+        raise TestRailError(
+            f"File {path.name} is larger than TestRail's {limit // (1024 * 1024)} MB limit "
+            "(it may have grown since it was checked)."
+        )
+    return data
 
 
 def build_ssl_context(config: Config) -> ssl.SSLContext:
@@ -329,7 +344,7 @@ class TestRailClient:
         upload_parts: tuple[str, bytes] | None = None
         if file_path is not None:
             # Read off the event loop so large/slow disks do not stall other tool calls.
-            data = await asyncio.to_thread(file_path.read_bytes)
+            data = await asyncio.to_thread(read_upload, file_path, MAX_UPLOAD_BYTES)
             upload_parts = (file_path.name, data)
         while True:
             if upload_parts is not None:
@@ -397,8 +412,13 @@ class TestRailClient:
         response = await self._http.send(request, stream=True)
         try:
             declared = response.headers.get("Content-Length", "")
-            if declared.isdigit() and int(declared) > self._max_response_bytes:
-                raise self._too_large(method, response.status_code, int(declared))
+            # ASCII digits only; more than 15 digits is over any limit (and int() of
+            # thousands of digits would raise instead of failing cleanly).
+            if declared.isascii() and declared.isdigit():
+                too_long = len(declared) > 15 or int(declared) > self._max_response_bytes
+                if too_long:
+                    size = int(declared) if len(declared) <= 15 else 10**15
+                    raise self._too_large(method, response.status_code, size)
             chunks: list[bytes] = []
             size = 0
             async for chunk in response.aiter_bytes():
@@ -500,12 +520,16 @@ class TestRailClient:
         key: str,
         params: Params | None = None,
         max_items: int = DEFAULT_MAX_ITEMS,
+        stop: Callable[[list[Any]], bool] | None = None,
     ) -> tuple[list[Any], bool]:
-        """Follow ``_links.next`` until exhausted or ``max_items`` reached.
+        """Follow ``_links.next`` until exhausted, ``max_items`` reached, or ``stop``.
 
         The next link is only used as a signal; the follow-up request is rebuilt from
         the same allowlisted method with an advanced ``offset``, so a server-provided
         URL can never redirect us to a different method.
+
+        ``stop(collected)`` is checked after each page; returning True ends the walk early
+        (e.g. once the caller's output budget is full), saving API calls and rate limit.
 
         Returns (items, truncated).
         """
@@ -529,6 +553,8 @@ class TestRailClient:
                 return collected[:max_items], True
             if not more:
                 return collected, False
+            if stop is not None and stop(collected):
+                return collected, True
             offset += len(items)
 
     async def get_statuses(self, *, refresh: bool = False) -> list[dict[str, Any]]:

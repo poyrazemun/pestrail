@@ -5,10 +5,10 @@ from __future__ import annotations
 from collections.abc import Sequence
 from pathlib import Path
 
-from .client import TestRailError
+from .client import MAX_UPLOAD_BYTES, TestRailError
 
-#: TestRail's documented maximum attachment size.
-MAX_ATTACHMENT_BYTES = 256 * 1024 * 1024
+#: TestRail's documented maximum attachment size (single source: client.MAX_UPLOAD_BYTES).
+MAX_ATTACHMENT_BYTES = MAX_UPLOAD_BYTES
 
 
 class AttachmentError(TestRailError):

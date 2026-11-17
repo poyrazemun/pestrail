@@ -34,8 +34,19 @@ _BLOCK_TAGS = frozenset(
 )  # fmt: skip
 _SKIP_TAGS = frozenset({"script", "style", "head", "title", "template", "noscript"})
 _HEADINGS = {f"h{n}": n for n in range(1, 7)}
-_INVISIBLE = str.maketrans({"​": None, "﻿": None, "­": None})
+# Zero-width space, byte-order mark and soft hyphen: invisible noise from pasted text.
+_INVISIBLE = str.maketrans({"\u200b": None, "\ufeff": None, "\u00ad": None})
 _WS = re.compile(r"\s+")
+
+#: Hard cap on HTML converted per call. Real comments are far smaller; the cap bounds
+#: CPU and memory for hostile input (and html.parser's own worst cases).
+MAX_HTML_CHARS = 500_000
+#: Deepest list indentation emitted; deeper nesting is flattened to this level so
+#: thousands of nested lists cannot multiply the output size.
+MAX_LIST_INDENT = 5
+#: How many pieces after a link start are inspected to build its label (bounded, so
+#: thousands of unclosed nested <a> tags cannot make conversion quadratic).
+_LINK_LABEL_PIECES = 64
 
 
 def looks_like_html(text: str) -> bool:
@@ -44,11 +55,18 @@ def looks_like_html(text: str) -> bool:
 
 
 def html_to_markdown(html: str) -> str:
-    """Convert rich-text HTML to readable Markdown-like text (see module docstring)."""
+    """Convert rich-text HTML to readable Markdown-like text (see module docstring).
+
+    Input beyond MAX_HTML_CHARS is not converted; a marker says how much was skipped.
+    """
+    skipped = max(len(html) - MAX_HTML_CHARS, 0)
     parser = _Converter()
-    parser.feed(html)
+    parser.feed(html[:MAX_HTML_CHARS] if skipped else html)
     parser.close()
-    return parser.result()
+    text = parser.result()
+    if skipped:
+        text += f"\n\n[... {skipped} more characters of HTML were not converted]"
+    return text
 
 
 class _Converter(HTMLParser):
@@ -135,7 +153,7 @@ class _Converter(HTMLParser):
         elif tag == "li":
             self.after_marker = False
             self._nl(1)
-            depth = max(len(self.lists) - 1, 0)
+            depth = min(max(len(self.lists) - 1, 0), MAX_LIST_INDENT)
             marker = "- "
             if self.lists and self.lists[-1][0] == "ol":
                 self.lists[-1][1] = int(self.lists[-1][1]) + 1
@@ -214,7 +232,8 @@ class _Converter(HTMLParser):
             self._nl(2)
         elif tag == "a" and self.links:
             href, start = self.links.pop()
-            label = "".join(str(v) for k, v in self.pieces[start:] if k in ("text", "raw"))
+            window = self.pieces[start : start + _LINK_LABEL_PIECES]
+            label = "".join(str(v) for k, v in window if k in ("text", "raw"))
             label = _WS.sub(" ", label).strip()
             href = (href or "").strip()
             if href and not href.lower().startswith(("javascript:", "#")) and href != label:
@@ -230,6 +249,10 @@ class _Converter(HTMLParser):
         else:
             if data.strip():
                 self.after_marker = False
+            elif (
+                self.pieces and self.pieces[-1][0] == "text" and not str(self.pieces[-1][1]).strip()
+            ):
+                return  # consecutive whitespace is one space anyway; avoids O(n^2) scans
             self.pieces.append(("text", data))
 
     # HTML comments (<!-- ... -->), doctypes and processing instructions are dropped by

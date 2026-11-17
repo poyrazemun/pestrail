@@ -26,9 +26,31 @@ lists could exceed the MCP client's size limit.
 - `get_results`: `result_id` to return a single result (TestRail has no single-result API,
   so it is looked up within the test's results).
 
+### Security
+- HTML conversion is bounded against hostile comments: nested links and whitespace in
+  table cells no longer cause quadratic slowdowns, list indentation is capped so nesting
+  can't multiply the output, and at most 500,000 characters of HTML are converted.
+- `get_user_by_email` checks the length before the email regex, which was quadratic on
+  long input (a 64 KB string blocked the server for seconds); the parameter is capped at
+  254 characters.
+- Attachments are read with a hard 256 MB limit, so a file that grows after validation
+  (e.g. a live log) can't be loaded into memory past TestRail's limit.
+
 ### Fixed
 - The `get_results_for_run` description said `get_results` returns full comments; it did not.
 - uv now rebuilds the project's metadata when `__init__.py` (the version source) changes.
+- Very long numbers or Unicode digits in IDs, dates, statuses or a `Content-Length` header
+  now give a clear error instead of an internal `ValueError`; error messages no longer echo
+  huge inputs back.
+- `get_results` with `result_id` says when the result wasn't among the newest 1,000 instead
+  of reporting it as not found, and stops fetching as soon as the result is found.
+- `fetch_all` stops requesting pages once the output budget is full, instead of fetching up
+  to `max_items` and discarding most of it.
+
+### Internal
+- Removed unused code (`to_compact_json`, `truncate_comment`, a redundant wrapper).
+- Source files are ASCII-only (escapes for invisible characters); CI actions are pinned to
+  commit SHAs.
 
 ## 0.1.1
 - PyPI page refreshed with the current README. No code changes.

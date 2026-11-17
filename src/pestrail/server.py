@@ -13,7 +13,7 @@ from mcp.types import TextContent, ToolAnnotations
 from . import __version__
 from .client import TestRailClient, TestRailError
 from .config import Config
-from .serialize import compact, to_json_text
+from .serialize import to_json_text
 
 logger = logging.getLogger(__name__)
 
@@ -46,10 +46,6 @@ WRITE_ANNOTATIONS = ToolAnnotations(
 )
 
 ToolFn = Callable[..., Awaitable[Any]]
-
-
-#: Single-line compact JSON (kept under its old name for compatibility).
-to_compact_json = compact
 
 
 class Registry:

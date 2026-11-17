@@ -113,8 +113,6 @@ ATTACHMENT_FIELDS = (
 )
 
 TIMESTAMP_FIELDS = {"created_on", "updated_on", "completed_on", "due_on", "start_on"}
-#: Former fixed limit for raw comments (pre-0.2); still the default of truncate_comment().
-LIST_COMMENT_LIMIT = 1000
 #: Default length of a *cleaned* comment in results tools (comment_max_chars).
 DEFAULT_COMMENT_CHARS = 2000
 
@@ -155,15 +153,6 @@ def with_status(obj: Mapping[str, Any], labels: Mapping[int, str]) -> dict[str, 
     status_id = out.get("status_id")
     if status_id is not None and status_id in labels:
         out["status"] = labels[status_id]
-    return out
-
-
-def truncate_comment(obj: Mapping[str, Any], limit: int = LIST_COMMENT_LIMIT) -> dict[str, Any]:
-    """Cut a raw comment to ``limit`` characters (kept for compatibility; see shape_comment)."""
-    out = dict(obj)
-    comment = out.get("comment")
-    if isinstance(comment, str) and len(comment) > limit:
-        out["comment"] = comment[:limit] + f"... [truncated, {len(comment)} chars total]"
     return out
 
 

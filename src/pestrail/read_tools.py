@@ -16,6 +16,11 @@ if TYPE_CHECKING:
     from .server import Registry
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+#: RFC 5321 limit. Checked *before* the regex, which backtracks quadratically on
+#: long inputs (a 64 KB string took seconds and blocked the server).
+MAX_EMAIL_CHARS = 254
+#: Unix seconds: ASCII digits only (\d would accept Unicode digits int() rejects).
+_TIMESTAMP_RE = re.compile(r"[0-9]{1,12}")
 
 # --------------------------------------------------------------------------- parameter types
 
@@ -85,6 +90,9 @@ DateFilter = Annotated[
     Field(description="Date as 'YYYY-MM-DD', ISO-8601 datetime, or unix timestamp (UTC)."),
 ]
 OptBool = Annotated[bool | None, Field(description="Omit for no filter.")]
+DefectsFilter = Annotated[
+    str | None, Field(description="Only results linked to this defect ID, e.g. 'JIRA-123'.")
+]
 IncludeComments = Annotated[
     bool,
     Field(description="Include result comments (default true). False gives a compact overview."),
@@ -145,11 +153,14 @@ def to_timestamp(value: int | str | None) -> int | None:
         ts = value
     else:
         text = str(value).strip()
-        if text.isdigit():
+        if len(text) > 64:
+            raise TestRailError(f"Invalid date {value[:20]!r}...: too long.")
+        if _TIMESTAMP_RE.fullmatch(text):
             ts = int(text)
         else:
             try:
-                parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+                # Python 3.11+ parses a trailing "Z" (UTC) natively.
+                parsed = datetime.fromisoformat(text)
             except ValueError as exc:
                 raise TestRailError(
                     f"Invalid date {value!r}: use 'YYYY-MM-DD', ISO-8601 or a unix timestamp."
@@ -216,8 +227,18 @@ async def list_page(
             params["limit"] = limit
         if offset:
             params["offset"] = offset
+        # Stop requesting pages once the shaped items already exceed the output budget:
+        # anything beyond it would be fetched only to be discarded.
+        used = [_ENVELOPE_CHARS, 0]  # [characters so far, items measured]
+
+        def budget_full(collected: list[Any]) -> bool:
+            while used[1] < len(collected):
+                used[0] += len(compact(shape(collected[used[1]]))) + 2
+                used[1] += 1
+            return used[0] > budget
+
         items, truncated = await client.get_all(
-            method, *path_args, key=key, params=params, max_items=max_items
+            method, *path_args, key=key, params=params, max_items=max_items, stop=budget_full
         )
         shaped = [shape(i) for i in items]
         kept = fit_to_budget(shaped, budget)
@@ -645,25 +666,6 @@ def register(reg: "Registry") -> None:
 
     # ------------------------------------------------------------------ results
 
-    DefectsFilter = Annotated[
-        str | None, Field(description="Only results linked to this defect ID, e.g. 'JIRA-123'.")
-    ]
-
-    def _result_shape(
-        labels: dict[int, str],
-        include_comments: bool,
-        comment_max_chars: int,
-        full_comment: bool,
-        comment_format: sh.CommentFormat,
-    ) -> Callable[[dict[str, Any]], dict[str, Any]]:
-        return sh.result_shape(
-            labels,
-            include_comments=include_comments,
-            comment_max_chars=comment_max_chars,
-            full_comment=full_comment,
-            comment_format=comment_format,
-        )
-
     @reg.read
     async def get_results(
         test_id: TestId,
@@ -693,8 +695,12 @@ def register(reg: "Registry") -> None:
         tid = parse_id(test_id, "test")
         statuses = await client.get_statuses() if status else []
         labels = await reg.status_labels()
-        shape = _result_shape(
-            labels, include_comments, comment_max_chars, full_comment, comment_format
+        shape = sh.result_shape(
+            labels,
+            include_comments=include_comments,
+            comment_max_chars=comment_max_chars,
+            full_comment=full_comment,
+            comment_format=comment_format,
         )
         params = {
             "status_id": resolve_status_filter(status, statuses),
@@ -702,19 +708,30 @@ def register(reg: "Registry") -> None:
         }
         if result_id is not None and result_id != "":
             rid = parse_id(result_id, "result")
-            found, _ = await client.get_all(
+
+            def is_match(r: Any) -> bool:
+                return isinstance(r, dict) and r.get("id") == rid
+
+            found, truncated = await client.get_all(
                 "get_results",
                 tid,
                 key="results",
                 params={k: v for k, v in params.items() if v is not None},
                 max_items=RESULT_LOOKUP_MAX,
+                stop=lambda collected: any(is_match(r) for r in collected),  # stop once found
             )
-            match = [shape(r) for r in found if isinstance(r, dict) and r.get("id") == rid]
+            match = [shape(r) for r in found if is_match(r)]
             out: dict[str, Any] = {
                 "results": match,
                 "paging": {"offset": 0, "returned": len(match), "has_more": False},
             }
-            if not match:
+            if not match and truncated:
+                out["note"] = (
+                    f"Result {rid} was not found among the newest {RESULT_LOOKUP_MAX} results "
+                    f"of test {tid}; older results were not searched. Use get_results with "
+                    "offset to page further back."
+                )
+            elif not match:
                 out["note"] = (
                     f"Result {rid} was not found among the results of test {tid}. "
                     "Check the IDs with get_results_for_run or get_results(test_id)."
@@ -758,8 +775,12 @@ def register(reg: "Registry") -> None:
             parse_id(run_id, "run"),
             parse_id(case_id, "case"),
             key="results",
-            shape=_result_shape(
-                labels, include_comments, comment_max_chars, full_comment, comment_format
+            shape=sh.result_shape(
+                labels,
+                include_comments=include_comments,
+                comment_max_chars=comment_max_chars,
+                full_comment=full_comment,
+                comment_format=comment_format,
             ),
             params={
                 "status_id": resolve_status_filter(status, statuses),
@@ -808,8 +829,12 @@ def register(reg: "Registry") -> None:
             "get_results_for_run",
             parse_id(run_id, "run"),
             key="results",
-            shape=_result_shape(
-                labels, include_comments, comment_max_chars, full_comment, comment_format
+            shape=sh.result_shape(
+                labels,
+                include_comments=include_comments,
+                comment_max_chars=comment_max_chars,
+                full_comment=full_comment,
+                comment_format=comment_format,
             ),
             params=params,
             limit=limit,
@@ -915,11 +940,13 @@ def register(reg: "Registry") -> None:
 
     @reg.read
     async def get_user_by_email(
-        email: Annotated[str, Field(description="The user's email address.")],
+        email: Annotated[
+            str, Field(max_length=MAX_EMAIL_CHARS, description="The user's email address.")
+        ],
     ) -> dict:
         """Look up a single user by email address (to get the ID for assigned_to_id)."""
         cleaned = email.strip()
-        if not _EMAIL_RE.fullmatch(cleaned) or len(cleaned) > 254:
+        if len(cleaned) > MAX_EMAIL_CHARS or not _EMAIL_RE.fullmatch(cleaned):
             raise TestRailError(f"{email!r} is not an email address.")
         return sh.pick(
             await client.get("get_user_by_email", params={"email": cleaned}), sh.USER_FIELDS
