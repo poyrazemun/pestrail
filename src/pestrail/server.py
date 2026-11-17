@@ -1,7 +1,6 @@
 """MCP server app: builds an MCPServer and registers TestRail tools."""
 
 import functools
-import json
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -14,6 +13,7 @@ from mcp.types import TextContent, ToolAnnotations
 from . import __version__
 from .client import TestRailClient, TestRailError
 from .config import Config
+from .serialize import to_json_text
 
 logger = logging.getLogger(__name__)
 
@@ -48,15 +48,6 @@ WRITE_ANNOTATIONS = ToolAnnotations(
 ToolFn = Callable[..., Awaitable[Any]]
 
 
-def to_compact_json(value: Any) -> str:
-    """Serialize a tool result as compact JSON.
-
-    The SDK would pretty-print with indent=2, which costs the model tokens on every call.
-    Non-ASCII text (names, comments) is kept as-is rather than \\u-escaped.
-    """
-    return json.dumps(value, separators=(",", ":"), ensure_ascii=False, default=str)
-
-
 class Registry:
     """Shared state handed to tool modules: the MCP app, the client and the config."""
 
@@ -74,8 +65,9 @@ class Registry:
             except TestRailError as exc:
                 # Anticipated failure: give the model a clear message, no stack trace.
                 raise ToolError(str(exc)) from exc
-            # A ready-made content block is passed through by the SDK unchanged.
-            return TextContent(type="text", text=to_compact_json(result))
+            # A ready-made content block is passed through by the SDK unchanged. The SDK
+            # would pretty-print (indent=2); we emit compact JSON, one list item per line.
+            return TextContent(type="text", text=to_json_text(result))
 
         self.mcp.tool(annotations=annotations)(wrapper)
         self.tool_names.append(fn.__name__)

@@ -18,6 +18,7 @@ All settings are environment variables, normally set in your MCP client's `env` 
 | `TESTRAIL_UPLOAD_TIMEOUT` | no | Timeout for attachment uploads. Default `300`, max `3600`. |
 | `TESTRAIL_CA_BUNDLE` | no | PEM file with CA certificates to trust (see [Corporate networks](#corporate-networks-proxies-and-tls)). |
 | `TESTRAIL_ALLOW_HTTP` | no | `true` allows plain `http://` for a non-local host. **Your API key is then sent unencrypted.** |
+| `PESTRAIL_MAX_OUTPUT_CHARS` | no | Size budget for one list response, in characters. Default `40000` (about 10–13k tokens), range `5000`–`1000000`. Larger pages are cut and continue via `paging.next_offset`. Raise it only if your MCP client accepts larger tool results. |
 | `PESTRAIL_LOG_LEVEL` | no | `DEBUG`, `INFO`, `WARNING` (default) or `ERROR`. Logs go to stderr only. |
 | `PESTRAIL_ENV_FILE` | no | Path to a `.env` file to load, or `none` to disable `.env` loading. |
 

@@ -19,8 +19,19 @@ PREFIXES: dict[str, str] = {
     "milestone": "M",
 }
 
-_ID_RE = re.compile(r"^\s*([A-Za-z]?)\s*(\d+)\s*$")
+#: TestRail IDs are positive integers; 18 digits is far above any real ID and keeps the
+#: value well inside int64 and Python's int-from-string limits. [0-9], not \d: \d also
+#: matches Unicode digits such as U+00B2 (superscript two), which int() rejects.
+MAX_ID_DIGITS = 18
+_ID_RE = re.compile(r"^\s*([A-Za-z]?)\s*([0-9]{1,18})\s*$")
+_INT_RE = re.compile(r"[0-9]{1,18}")
 UNTESTED_STATUS_ID = 3
+
+
+def _short(value: object, limit: int = 40) -> str:
+    """repr() of user input for error messages, cut so huge inputs aren't echoed back."""
+    text = repr(value)
+    return text if len(text) <= limit else text[:limit] + "...'"
 
 
 def parse_id(value: int | str | None, kind: str) -> int:
@@ -33,15 +44,16 @@ def parse_id(value: int | str | None, kind: str) -> int:
     if value is None:
         raise TestRailError(f"A {label} ID is required.")
     if isinstance(value, bool):
-        raise TestRailError(f"Invalid {label} ID {value!r}.")
+        raise TestRailError(f"Invalid {label} ID {_short(value)}.")
     if isinstance(value, int):
-        if value <= 0:
-            raise TestRailError(f"Invalid {label} ID {value!r}: must be a positive integer.")
+        if value <= 0 or value >= 10**MAX_ID_DIGITS:
+            raise TestRailError(f"Invalid {label} ID {_short(value)}: must be a positive integer.")
         return value
-    match = _ID_RE.match(str(value))
+    text = str(value)
+    match = _ID_RE.match(text) if len(text) <= 64 else None
     if not match:
         raise TestRailError(
-            f"Invalid {label} ID {value!r}: expected a number"
+            f"Invalid {label} ID {_short(value)}: expected a number"
             + (f" or {PREFIXES[kind]}<number>" if kind in PREFIXES else "")
             + "."
         )
@@ -50,11 +62,11 @@ def parse_id(value: int | str | None, kind: str) -> int:
     if prefix and prefix != expected:
         hint = f" (expected {expected}<number>)" if expected else ""
         raise TestRailError(
-            f"ID {value!r} has prefix {prefix!r}, which does not belong to a {label}{hint}."
+            f"ID {_short(value)} has prefix {prefix!r}, which does not belong to a {label}{hint}."
         )
     number = int(digits)
     if number <= 0:
-        raise TestRailError(f"Invalid {label} ID {value!r}: must be a positive integer.")
+        raise TestRailError(f"Invalid {label} ID {_short(value)}: must be a positive integer.")
     return number
 
 
@@ -80,8 +92,8 @@ def resolve_status(
     """
     status_id: int | None = None
     if isinstance(value, bool):
-        raise TestRailError(f"Invalid status {value!r}.")
-    if isinstance(value, int) or (isinstance(value, str) and value.strip().isdigit()):
+        raise TestRailError(f"Invalid status {_short(value)}.")
+    if isinstance(value, int) or (isinstance(value, str) and _INT_RE.fullmatch(value.strip())):
         status_id = int(value)
         if statuses and not any(s.get("id") == status_id for s in statuses):
             raise TestRailError(
@@ -95,7 +107,9 @@ def resolve_status(
                 status_id = int(status["id"])
                 break
         if status_id is None:
-            raise TestRailError(f"Unknown status {value!r}. Valid statuses: {_describe(statuses)}")
+            raise TestRailError(
+                f"Unknown status {_short(value)}. Valid statuses: {_describe(statuses)}"
+            )
 
     if allow_untested:
         return status_id

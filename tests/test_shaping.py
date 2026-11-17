@@ -13,8 +13,10 @@ def test_with_status_does_not_mutate_input():
     assert out is not original
 
 
-def test_truncate_comment_does_not_mutate_input():
-    original = {"comment": "x" * 50}
-    out = sh.truncate_comment(original, limit=10)
-    assert out["comment"].startswith("xxxxxxxxxx...")
-    assert original["comment"] == "x" * 50
+def test_result_shape_does_not_mutate_input():
+    original = {"id": 1, "status_id": 5, "comment": "<p>" + "x" * 50 + "</p>"}
+    shape = sh.result_shape({5: "Failed"}, comment_max_chars=10)
+    out = shape(original)
+    assert out["comment"] == "x" * 10 + "... [truncated, 50 chars total]"
+    assert original["comment"] == "<p>" + "x" * 50 + "</p>"
+    assert "status" not in original

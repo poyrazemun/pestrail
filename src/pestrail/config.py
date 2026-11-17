@@ -16,6 +16,10 @@ DEFAULT_TIMEOUT = 30.0
 DEFAULT_UPLOAD_TIMEOUT = 300.0
 MAX_TIMEOUT = 600.0
 MAX_UPLOAD_TIMEOUT = 3600.0
+#: ~10-13k tokens: below the default per-tool output limit of common MCP clients.
+DEFAULT_MAX_OUTPUT_CHARS = 40_000
+MIN_OUTPUT_CHARS = 5_000
+MAX_OUTPUT_CHARS = 1_000_000
 _TRUE = {"1", "true", "yes", "on"}
 _FALSE = {"0", "false", "no", "off", ""}
 
@@ -74,6 +78,9 @@ class Config:
     timeout: float = DEFAULT_TIMEOUT
     ca_bundle: Path | None = None
     upload_timeout: float = DEFAULT_UPLOAD_TIMEOUT
+    #: Size budget (characters) for one list tool response; larger pages are cut and
+    #: continue via paging.next_offset, so MCP clients never reject the result as too big.
+    max_output_chars: int = DEFAULT_MAX_OUTPUT_CHARS
 
 
 def _is_loopback(host: str | None) -> bool:
@@ -167,6 +174,21 @@ def parse_timeout(
         raise ConfigError(f"{name} must be a finite number greater than 0")
     if value > max_value:
         raise ConfigError(f"{name} must be at most {max_value:g} seconds, got {value:g}")
+    return value
+
+
+def parse_max_output_chars(raw: str | None) -> int:
+    name = "PESTRAIL_MAX_OUTPUT_CHARS"
+    if raw is None or not raw.strip():
+        return DEFAULT_MAX_OUTPUT_CHARS
+    try:
+        value = int(raw.strip().replace("_", ""))
+    except ValueError as exc:
+        raise ConfigError(f"{name} must be a whole number of characters, got {raw!r}") from exc
+    if not MIN_OUTPUT_CHARS <= value <= MAX_OUTPUT_CHARS:
+        raise ConfigError(
+            f"{name} must be between {MIN_OUTPUT_CHARS} and {MAX_OUTPUT_CHARS}, got {value}"
+        )
     return value
 
 
@@ -306,6 +328,7 @@ def load_config(env: Mapping[str, str] | None = None) -> Config:
         ),
         timeout=parse_timeout(env.get("TESTRAIL_TIMEOUT"), max_value=MAX_TIMEOUT),
         ca_bundle=parse_ca_bundle(env.get("TESTRAIL_CA_BUNDLE")),
+        max_output_chars=parse_max_output_chars(env.get("PESTRAIL_MAX_OUTPUT_CHARS")),
         upload_timeout=parse_timeout(
             env.get("TESTRAIL_UPLOAD_TIMEOUT"),
             "TESTRAIL_UPLOAD_TIMEOUT",
