@@ -57,10 +57,10 @@ lists could exceed the MCP client's size limit.
 - Source files are ASCII-only (escapes for invisible characters); CI actions are pinned to
   commit SHAs.
 
-## 0.1.1
+## 0.1.1 (2026-11-12)
 
 - PyPI page refreshed with the current README. No code changes.
 
-## 0.1.0
+## 0.1.0 (2026-11-12)
 
 - First public release.
