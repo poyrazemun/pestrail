@@ -283,6 +283,97 @@ def test_unknown_result_id_returns_empty_with_note(mock_api, statuses):
     assert "999" in out["note"]
 
 
+# ----------------------------------------------------------------- empty fields and hints (0.2.1)
+
+
+def real_shape_results(count: int) -> list[dict[str, Any]]:
+    """Results shaped like the real API: every field present, most of them null or empty.
+
+    Mixes passed/failed results, some with defects and attachments, and assignment-only
+    entries (no status, no comment), like run 650 on the real instance.
+    """
+    out = []
+    for i in range(count):
+        kind = i % 4
+        out.append(
+            {
+                "id": 47000 + i,
+                "test_id": 73800 + i % 131,
+                "status_id": None if kind == 3 else (5 if kind == 2 else 1),
+                "created_on": 1_763_000_000 + i,
+                "assignedto_id": 19 if kind == 3 else None,
+                "comment": None if kind == 3 else styled("Checked on build 4.2.1"),
+                "version": None,
+                "elapsed": None,
+                "defects": "BEAMR-286" if kind == 2 else None,
+                "created_by": 19 + i % 2,
+                "custom_step_results": None,
+                "attachment_ids": [900 + i] if kind == 1 else [],
+            }
+        )
+    return out
+
+
+def test_empty_fields_are_left_out(mock_api, statuses):
+    mock_test_results(mock_api, real_shape_results(4))
+    out = json.loads(call_text(build(), "get_results", {"test_id": 73925}))
+    passed, with_attachment, failed, assignment = out["results"]
+    for result in out["results"]:
+        assert {"id", "test_id", "created_by", "created_on"} <= set(result)
+        assert not {"version", "elapsed", "custom_step_results"} & set(result)
+        assert all(value not in (None, "", []) for value in result.values())
+    assert "defects" not in passed and "attachment_ids" not in passed
+    assert with_attachment["attachment_ids"] == [901]
+    assert failed["defects"] == "BEAMR-286" and failed["status"] == "Failed"
+    # Assignment-only entry: no status and no comment, just who/when/assignee.
+    assert set(assignment) == {"id", "test_id", "assignedto_id", "created_by", "created_on"}
+
+
+def test_250_real_shape_results_without_comments_fit_one_page(mock_api, statuses):
+    # Seen on the real instance: only 185 of 250 fitted, because of null fields.
+    mock_run_results(mock_api, real_shape_results(250))
+    text = call_text(
+        build(), "get_results_for_run", {"run_id": 650, "limit": 250, "include_comments": False}
+    )
+    out = json.loads(text)
+    assert out["paging"]["returned"] == 250
+    assert "note" not in out["paging"]
+    assert len(text) <= DEFAULT_MAX_OUTPUT_CHARS
+
+
+def test_budget_note_without_comments_does_not_suggest_dropping_them(mock_api, statuses):
+    mock_run_results(mock_api, real_shape_results(250))
+    out = json.loads(
+        call_text(
+            build(max_output_chars=5_000),
+            "get_results_for_run",
+            {"run_id": 650, "limit": 250, "include_comments": False},
+        )
+    )
+    paging = out["paging"]
+    assert paging["returned"] < 250
+    assert "output size budget" in paging["note"]
+    assert "include_comments" not in paging["note"]
+    assert "comment_max_chars" not in paging["note"]
+
+
+def test_budget_cut_hint_points_to_offset_only(mock_api, statuses):
+    # fetch_all has the same budget, so suggesting it after a size cut would not help.
+    mock_run_results(mock_api, make_results(250))
+    out = json.loads(call_text(build(), "get_results_for_run", {"run_id": 650, "limit": 250}))
+    paging = out["paging"]
+    assert paging["hint"] == "Call again with offset=next_offset."
+    assert "include_comments=false" in paging["note"]  # comments are on: still good advice
+
+
+def test_page_limit_hint_still_mentions_fetch_all(mock_api, statuses):
+    mock_run_results(mock_api, make_results(10, comment="short"))
+    out = json.loads(call_text(build(), "get_results_for_run", {"run_id": 650, "limit": 5}))
+    paging = out["paging"]
+    assert paging["has_more"] is True and "note" not in paging
+    assert "fetch_all=true" in paging["hint"]
+
+
 # ----------------------------------------------------------------- configuration
 
 BASE_ENV = {

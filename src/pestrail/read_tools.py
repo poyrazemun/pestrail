@@ -124,6 +124,12 @@ RESULTS_BUDGET_HINT = (
     "To fit more per call, use include_comments=false or a smaller comment_max_chars."
 )
 
+
+def results_budget_hint(include_comments: bool) -> str:
+    """Advice for a results page cut by the output budget (none if comments are already off)."""
+    return RESULTS_BUDGET_HINT if include_comments else ""
+
+
 FIELD_TYPES = {
     1: "String",
     2: "Integer",
@@ -287,7 +293,12 @@ async def list_page(
     paging: dict[str, Any] = {"offset": offset, "returned": len(shaped), "has_more": has_more}
     if has_more:
         paging["next_offset"] = offset + len(shaped)
-        paging["hint"] = "Call again with offset=next_offset, or use fetch_all=true."
+        # fetch_all is held to the same output budget, so after a size cut only paging helps.
+        paging["hint"] = (
+            "Call again with offset=next_offset."
+            if cut_by_budget
+            else "Call again with offset=next_offset, or use fetch_all=true."
+        )
     if cut_by_budget:
         paging["note"] = _budget_note(kept, budget, paging["next_offset"], budget_hint)
     return {key: shaped, "paging": paging}
@@ -746,7 +757,7 @@ def register(reg: "Registry") -> None:
             params=params,
             limit=limit,
             offset=offset,
-            budget_hint=RESULTS_BUDGET_HINT,
+            budget_hint=results_budget_hint(include_comments),
         )
 
     @reg.read
@@ -788,7 +799,7 @@ def register(reg: "Registry") -> None:
             },
             limit=limit,
             offset=offset,
-            budget_hint=RESULTS_BUDGET_HINT,
+            budget_hint=results_budget_hint(include_comments),
         )
 
     @reg.read
@@ -841,7 +852,7 @@ def register(reg: "Registry") -> None:
             offset=offset,
             fetch_all=fetch_all,
             max_items=max_items,
-            budget_hint=RESULTS_BUDGET_HINT,
+            budget_hint=results_budget_hint(include_comments),
         )
 
     # ------------------------------------------------------------------ attachments

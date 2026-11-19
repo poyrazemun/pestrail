@@ -184,6 +184,10 @@ def shape_comment(
     return text[:max_chars] + f"... [truncated, {len(text)} chars total]"
 
 
+def _is_empty(value: Any) -> bool:
+    return value is None or (isinstance(value, (str, list, dict)) and not value)
+
+
 def result_shape(
     labels: Mapping[int, str],
     *,
@@ -206,7 +210,9 @@ def result_shape(
             for key, value in out.items():
                 if key.startswith("custom_"):
                     out[key] = clean_text(value)
-        return out
+        # Empty fields (null elapsed/defects/version, no attachments, ...) are left out: they
+        # cost ~1/3 of a result's size and say nothing. A missing field means "empty".
+        return {k: v for k, v in out.items() if not _is_empty(v)}
 
     return shape
 
