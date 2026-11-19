@@ -24,98 +24,56 @@ _TIMESTAMP_RE = re.compile(r"[0-9]{1,12}")
 
 # --------------------------------------------------------------------------- parameter types
 
-ProjectId = Annotated[
-    int | str, Field(description="Project ID, e.g. 1 or 'P1'. Use get_projects to find it.")
-]
-SuiteId = Annotated[
-    int | str, Field(description="Suite ID, e.g. 3 or 'S3'. Use get_suites to find it.")
-]
+ProjectId = Annotated[int | str, Field(description="Project ID, e.g. 1 or 'P1'.")]
+SuiteId = Annotated[int | str, Field(description="Suite ID, e.g. 3 or 'S3'.")]
 OptSuiteId = Annotated[
     int | str | None,
-    Field(
-        description="Suite ID (e.g. 3 or 'S3'). Required for projects with multiple suites; "
-        "omit for single-suite projects. Use get_suites."
-    ),
+    Field(description="Suite ID, e.g. 3 or 'S3'. Required only if the project has several."),
 ]
-CaseId = Annotated[
-    int | str, Field(description="Test case ID, e.g. 1234 or 'C1234'. Use get_cases to find it.")
-]
-RunId = Annotated[
-    int | str,
-    Field(
-        description="Test run ID, e.g. 56 or 'R56'. Use get_runs, or get_plan for runs in plans."
-    ),
-]
+CaseId = Annotated[int | str, Field(description="Case ID, e.g. 1234 or 'C1234'.")]
+RunId = Annotated[int | str, Field(description="Run ID, e.g. 56 or 'R56'.")]
 TestId = Annotated[
     int | str,
-    Field(
-        description="Test ID (an instance of a case inside a run), e.g. 678 or 'T678'. "
-        "Use get_tests(run_id) to find it. Not the same as a case ID."
-    ),
+    Field(description="Test ID (a case inside a run; not a case ID), e.g. 678 or 'T678'."),
 ]
-PlanId = Annotated[
-    int | str, Field(description="Test plan ID, e.g. 9 or 'P9'. Use get_plans to find it.")
-]
-MilestoneId = Annotated[
-    int | str, Field(description="Milestone ID, e.g. 2 or 'M2'. Use get_milestones to find it.")
-]
-Limit = Annotated[
-    int | None,
-    Field(ge=1, le=250, description="Max items to return (1-250). Default: TestRail's page size."),
-]
-Offset = Annotated[int, Field(ge=0, description="Number of items to skip, for paging.")]
+PlanId = Annotated[int | str, Field(description="Plan ID, e.g. 9 or 'P9'.")]
+MilestoneId = Annotated[int | str, Field(description="Milestone ID, e.g. 2 or 'M2'.")]
+Limit = Annotated[int | None, Field(ge=1, le=250, description="Page size (TestRail default: 250).")]
+Offset = Annotated[int, Field(ge=0, description="Items to skip, for paging.")]
 FetchAll = Annotated[
-    bool,
-    Field(
-        description="If true, follow pagination and return all items up to max_items. "
-        "Use sparingly on large projects; prefer filters."
-    ),
+    bool, Field(description="Follow pagination up to max_items. Prefer filters on big projects.")
 ]
-MaxItems = Annotated[
-    int, Field(ge=1, le=5000, description="Safety cap on items when fetch_all is true.")
-]
+MaxItems = Annotated[int, Field(ge=1, le=5000, description="Item cap for fetch_all.")]
 IdList = Annotated[
-    list[int | str] | int | str | None,
-    Field(description="One ID or a list of IDs to filter by."),
+    list[int | str] | int | str | None, Field(description="One ID or a list of IDs.")
 ]
 StatusFilter = Annotated[
     list[int | str] | int | str | None,
-    Field(
-        description="Filter by status: IDs or names, e.g. ['Failed', 'Retest'] or [5, 4]. "
-        "Use get_statuses to see options."
-    ),
+    Field(description="Status IDs or names, e.g. ['Failed', 'Retest'] or 5."),
 ]
 DateFilter = Annotated[
     int | str | None,
-    Field(description="Date as 'YYYY-MM-DD', ISO-8601 datetime, or unix timestamp (UTC)."),
+    Field(description="'YYYY-MM-DD', ISO-8601 datetime or unix timestamp (UTC)."),
 ]
 OptBool = Annotated[bool | None, Field(description="Omit for no filter.")]
 DefectsFilter = Annotated[
-    str | None, Field(description="Only results linked to this defect ID, e.g. 'JIRA-123'.")
+    str | None, Field(description="Only results linked to this defect, e.g. 'JIRA-123'.")
 ]
 IncludeComments = Annotated[
-    bool,
-    Field(description="Include result comments (default true). False gives a compact overview."),
+    bool, Field(description="False leaves comments out: a compact overview.")
 ]
 CommentMaxChars = Annotated[
     int,
     Field(
         ge=100,
         le=50_000,
-        description="Cut each comment after this many characters of cleaned text "
-        "(default 2000); a '[truncated, N chars total]' marker shows the full length.",
+        description="Cut each comment here; a '[truncated, N chars total]' marker is added.",
     ),
 ]
-FullComment = Annotated[
-    bool,
-    Field(description="Return comments in full, ignoring comment_max_chars (default false)."),
-]
+FullComment = Annotated[bool, Field(description="Return comments uncut.")]
 CommentFormatParam = Annotated[
     Literal["markdown", "raw"],
-    Field(
-        description="'markdown' (default): rich-text HTML is converted to readable Markdown "
-        "(styles and tags removed). 'raw': the comment exactly as stored in TestRail."
-    ),
+    Field(description="'markdown': rich-text HTML made readable. 'raw': as stored."),
 ]
 
 #: Most results scanned when looking up one result by id within a test (get_results).
@@ -691,17 +649,15 @@ def register(reg: "Registry") -> None:
         result_id: Annotated[
             int | str | None,
             Field(
-                description="Return only this result (from get_results_for_run or an add_result* "
-                "tool). TestRail has no single-result API, so it is looked up in this test's "
-                "results. Combine with full_comment=true to read one comment in full."
+                description="Return only this result (looked up in this test's results). "
+                "With full_comment=true, reads one comment in full."
             ),
         ] = None,
     ) -> dict:
-        """List results (newest first) for a test in a run. Use get_tests to find test IDs.
+        """List results (newest first) for a test in a run.
 
-        Comments are converted from rich-text HTML to readable Markdown and cut at
-        comment_max_chars (default 2000) with a '[truncated, N chars total]' marker; use
-        full_comment=true for the whole text. Set include_comments=false for a quick overview.
+        Comments are rich-text HTML made readable and cut at comment_max_chars (default
+        2000); full_comment=true returns them whole, include_comments=false leaves them out.
         """
         tid = parse_id(test_id, "test")
         statuses = await client.get_statuses() if status else []
@@ -773,11 +729,8 @@ def register(reg: "Registry") -> None:
         full_comment: FullComment = False,
         comment_format: CommentFormatParam = "markdown",
     ) -> dict:
-        """List results (newest first) for a case within a specific run.
-
-        Comments are converted to readable Markdown and cut at comment_max_chars; see
-        get_results for the comment options.
-        """
+        """List results (newest first) for a case within a run. Comment options as in
+        get_results."""
         statuses = await client.get_statuses() if status else []
         labels = await reg.status_labels()
         return await list_page(
@@ -819,12 +772,11 @@ def register(reg: "Registry") -> None:
         full_comment: FullComment = False,
         comment_format: CommentFormatParam = "markdown",
     ) -> dict:
-        """List all results added in a run (newest first).
+        """List all results added in a run (newest first). Comments as in get_results.
 
-        Comments are converted to readable Markdown and cut at comment_max_chars. Large
-        responses are cut to fit the output size budget; continue with paging.next_offset.
-        For an overview of a big run, use include_comments=false. To read one comment in
-        full, use get_results(test_id, result_id=..., full_comment=true).
+        Large responses are cut to the output size budget; continue with paging.next_offset.
+        For a big run use include_comments=false; read one comment in full with
+        get_results(test_id, result_id=..., full_comment=true).
         """
         statuses = await client.get_statuses() if status else []
         labels = await reg.status_labels()
@@ -926,8 +878,8 @@ def register(reg: "Registry") -> None:
         fetch_all: Annotated[
             bool,
             Field(
-                description="If true, follow pagination and return all users up to max_items. "
-                "Default false (one page); prefer get_user_by_email for a single person."
+                description="Follow pagination up to max_items. For one person, use "
+                "get_user_by_email."
             ),
         ] = False,
         max_items: MaxItems = 1000,

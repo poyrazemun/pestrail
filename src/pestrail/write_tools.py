@@ -39,62 +39,45 @@ MAX_CUSTOM_VALUE_CHARS = 10_000
 Status = Annotated[
     int | str | None,
     Field(
-        description="Result status: ID or name, e.g. 'Passed', 'Failed', 'Blocked', 'Retest', 5. "
-        "Custom statuses work too (see get_statuses). 'Untested' is not allowed. "
-        "Omit to add a comment-only result."
+        description="Status ID or name, e.g. 'Passed', 'Failed', 'Blocked', 'Retest', 5. "
+        "Not 'Untested'. Omit for a comment-only result."
     ),
 ]
 Comment = Annotated[
     str | None,
-    Field(
-        max_length=MAX_COMMENT_CHARS,
-        description=(
-            f"Result comment (max {MAX_COMMENT_CHARS} chars). Markdown is supported by TestRail."
-        ),
-    ),
+    Field(max_length=MAX_COMMENT_CHARS, description="Result comment (Markdown works)."),
 ]
 Elapsed = Annotated[
     str | None,
-    Field(
-        max_length=MAX_ELAPSED_CHARS,
-        description="Time spent, TestRail timespan format, e.g. '30s', '1m 30s', '2h'.",
-    ),
+    Field(max_length=MAX_ELAPSED_CHARS, description="Time spent, e.g. '30s', '1m 30s', '2h'."),
 ]
 Defects = Annotated[
     str | list[str] | None,
     Field(
-        description="Defect ID(s) to link, e.g. 'JIRA-123' or ['JIRA-1', 'JIRA-2'] "
-        f"(max {MAX_DEFECTS_CHARS} chars when joined)."
+        description="Defect ID(s), e.g. 'JIRA-123' or ['JIRA-1', 'JIRA-2'] "
+        f"(max {MAX_DEFECTS_CHARS} chars joined)."
     ),
 ]
 Version = Annotated[
     str | None,
-    Field(
-        max_length=MAX_VERSION_CHARS,
-        description=f"Version or build tested (max {MAX_VERSION_CHARS} chars), "
-        "e.g. '2.4.1' or a commit SHA.",
-    ),
+    Field(max_length=MAX_VERSION_CHARS, description="Version or build tested, e.g. '2.4.1'."),
 ]
 AssignedTo = Annotated[
-    int | None,
-    Field(description="User ID to assign the test to (see get_users / get_user_by_email)."),
+    int | None, Field(description="User ID to assign the test to (see get_user_by_email).")
 ]
 CustomFields = Annotated[
     dict[str, Any] | None,
     Field(
-        description="Custom result fields keyed by system name, e.g. "
-        f"{{'custom_environment': 'staging'}}. Keys must start with 'custom_'; "
-        f"at most {MAX_CUSTOM_FIELDS} fields, values max {MAX_CUSTOM_VALUE_CHARS} chars. "
-        "Discover them with get_result_fields."
+        description="Custom fields by system name, e.g. {'custom_env': 'staging'}. Keys start "
+        f"with 'custom_'; max {MAX_CUSTOM_FIELDS} fields of {MAX_CUSTOM_VALUE_CHARS} chars. "
+        "See get_result_fields."
     ),
 ]
 FilePath = Annotated[
     str,
     Field(
-        description="Absolute path to a local file on the machine running this server, "
-        "max 256 MB. Uploads are limited to TESTRAIL_ATTACHMENT_ROOTS (relative paths are "
-        "resolved against those roots). Only with TESTRAIL_ALLOW_ANY_ATTACHMENT_PATH may "
-        "any absolute readable path be used."
+        description="Local file (max 256 MB) inside TESTRAIL_ATTACHMENT_ROOTS; relative paths "
+        "are resolved against those roots."
     ),
 ]
 
@@ -260,9 +243,8 @@ def register(reg: Registry) -> None:
     ) -> dict:
         """Add a new result to a test (a case inside a run), identified by test ID.
 
-        Use get_tests(run_id) to find test IDs. If you only know the run and case IDs,
-        use add_result_for_case instead. Results are appended to the history and cannot be
-        removed through this server, so double-check the IDs. Fails if the run is closed.
+        If you only know the run and case IDs, use add_result_for_case. Fails if the run is
+        closed.
         """
         tid = parse_id(test_id, "test")
         run = await _scope(test_id=tid)
@@ -294,9 +276,8 @@ def register(reg: Registry) -> None:
     ) -> dict:
         """Add a new result for a case in a run, e.g. "mark C1234 in R56 as Failed".
 
-        The case must already be part of the run (check with get_tests). Results are
-        appended and cannot be removed through this server. Fails if the run is closed.
-        To attach logs/screenshots in the same step, use add_result_with_attachments.
+        The case must be in the run (see get_tests); fails if the run is closed. To attach
+        files in the same step, use add_result_with_attachments.
         """
         rid, cid = parse_id(run_id, "run"), parse_id(case_id, "case")
         await _scope(run_id=rid)
@@ -324,17 +305,15 @@ def register(reg: Registry) -> None:
             Field(
                 min_length=1,
                 max_length=MAX_BULK_RESULTS,
-                description="One entry per result: {case_id, status, comment, elapsed, "
-                "defects, version, assigned_to_id, custom_fields}.",
+                description="One entry per case.",
             ),
         ],
     ) -> dict:
-        """Add results for many cases in one run in a single request: the main tool for
+        """Add results for many cases in one run in one request: the main tool for
         reporting a test session.
 
-        All entries are validated (IDs, statuses, custom field keys) before anything is sent;
-        TestRail then adds them all or rejects the whole request. Every case must already be
-        in the run (see get_tests). Results cannot be removed through this server.
+        All entries are validated before anything is sent; TestRail then adds all or none.
+        Every case must already be in the run (see get_tests).
         """
         rid = parse_id(run_id, "run")
         await _scope(run_id=rid)
@@ -393,17 +372,14 @@ def register(reg: Registry) -> None:
     async def add_attachment_to_result(
         result_id: Annotated[
             int,
-            Field(
-                gt=0, description="Result ID, as returned by the add_result* tools or get_results."
-            ),
+            Field(gt=0, description="Result ID (from add_result* or get_results)."),
         ],
         file_path: FilePath,
         test_id: Annotated[
             int | str | None,
             Field(
-                description="The test the result belongs to (e.g. 678 or 'T678'). Only needed "
-                "when write allowlists are configured and the result was not created by this "
-                "server in the current session; it is verified against get_results(test_id)."
+                description="Test the result belongs to, e.g. 'T678'. Needed only with write "
+                "allowlists, for a result not added in this session (it is verified)."
             ),
         ] = None,
     ) -> dict:
@@ -466,7 +442,7 @@ def register(reg: Registry) -> None:
             Field(
                 min_length=1,
                 max_length=MAX_FILES_PER_CALL,
-                description="Local files to attach to the new result (logs, screenshots...).",
+                description="Local files inside TESTRAIL_ATTACHMENT_ROOTS (max 256 MB each).",
             ),
         ],
         status: Status = None,
@@ -477,12 +453,11 @@ def register(reg: Registry) -> None:
         assigned_to_id: AssignedTo = None,
         custom_fields: CustomFields = None,
     ) -> dict:
-        """Add a result for a case in a run, then upload files to that new result.
+        """Add a result for a case in a run, then upload files to it.
 
-        All files are checked (exist, allowed directory, size) before the result is created,
-        so a bad path creates nothing. If an upload fails after the result was created, the
-        result is kept (nothing can be deleted) and the response lists exactly which
-        uploads succeeded and which failed; retry failures with add_attachment_to_result.
+        All files are checked before the result is created, so a bad path creates nothing.
+        If an upload fails afterwards, the result is kept and the response lists which
+        uploads failed; retry them with add_attachment_to_result.
         """
         rid, cid = parse_id(run_id, "run"), parse_id(case_id, "case")
         await _scope(run_id=rid)
