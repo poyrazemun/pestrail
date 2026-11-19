@@ -76,6 +76,13 @@ TextFormatParam = Annotated[
     Field(description="'markdown': rich-text HTML made readable. 'raw': as stored."),
 ]
 
+AssignedTo = Annotated[
+    list[int | str] | int | str | None,
+    Field(description="Only tests assigned to these users: user IDs, 'me' or 'unassigned'."),
+]
+#: Most entries in an assigned_to filter (keeps the request URL small).
+MAX_ASSIGNEES = 100
+
 #: Most results scanned when looking up one result by id within a test (get_results).
 RESULT_LOOKUP_MAX = 1000
 RESULTS_BUDGET_HINT = (
@@ -232,17 +239,51 @@ async def list_page(
     if offset:
         params["offset"] = offset
     items, meta = await client.get_page(method, *path_args, key=key, params=params)
-
     if not meta.get("paginated"):
         # TestRail < 6.7 returns bare lists and ignores limit/offset, so the whole list
         # came back; page it client-side.
-        total = len(items)
-        end = offset + limit if limit else total
-        items = items[offset:end]
-        has_more = end < total
-    else:
-        has_more = bool(meta.get("has_more"))
+        return page_locally(
+            reg, items, key=key, shape=shape, limit=limit, offset=offset, budget_hint=budget_hint
+        )
+    return _page_out(
+        reg, items, bool(meta.get("has_more")), key=key, shape=shape, offset=offset,
+        budget_hint=budget_hint,
+    )  # fmt: skip
 
+
+def page_locally(
+    reg: "Registry",
+    items: list[Any],
+    *,
+    key: str,
+    shape: Callable[[dict[str, Any]], dict[str, Any]],
+    limit: int | None,
+    offset: int,
+    budget_hint: str = "",
+    fetch_all_hint: bool = True,
+) -> dict[str, Any]:
+    """Page an already-complete list with offset/limit, within the output budget."""
+    total = len(items)
+    end = offset + limit if limit else total
+    return _page_out(
+        reg, items[offset:end], end < total, key=key, shape=shape, offset=offset,
+        budget_hint=budget_hint, fetch_all_hint=fetch_all_hint,
+    )  # fmt: skip
+
+
+def _page_out(
+    reg: "Registry",
+    items: list[Any],
+    has_more: bool,
+    *,
+    key: str,
+    shape: Callable[[dict[str, Any]], dict[str, Any]],
+    offset: int,
+    budget_hint: str = "",
+    fetch_all_hint: bool = True,
+) -> dict[str, Any]:
+    """Shape one page, cut it to the output budget and describe how to continue."""
+    budget = reg.config.max_output_chars
     shaped = [shape(i) for i in items]
     kept = fit_to_budget(shaped, budget)
     cut_by_budget = kept < len(shaped)
@@ -255,9 +296,9 @@ async def list_page(
         paging["next_offset"] = offset + len(shaped)
         # fetch_all is held to the same output budget, so after a size cut only paging helps.
         paging["hint"] = (
-            "Call again with offset=next_offset."
-            if cut_by_budget
-            else "Call again with offset=next_offset, or use fetch_all=true."
+            "Call again with offset=next_offset, or use fetch_all=true."
+            if fetch_all_hint and not cut_by_budget
+            else "Call again with offset=next_offset."
         )
     if cut_by_budget:
         paging["note"] = _budget_note(kept, budget, paging["next_offset"], budget_hint)
@@ -266,6 +307,34 @@ async def list_page(
 
 def register(reg: "Registry") -> None:
     client = reg.client
+    me: dict[str, int] = {}  # the logged-in user's ID, cached for the session
+
+    async def current_user_id() -> int:
+        if "id" not in me:
+            await get_current_user()
+        if "id" not in me:
+            raise TestRailError("TestRail did not return the current user's ID.")
+        return me["id"]
+
+    async def resolve_assignees(value: list[int | str] | int | str) -> set[int | None]:
+        """User IDs / 'me' / 'unassigned' -> set of assignedto_id values (None = nobody)."""
+        parts = value if isinstance(value, list) else [v for v in str(value).split(",")]
+        parts = [p.strip() if isinstance(p, str) else p for p in parts]
+        parts = [p for p in parts if p != ""]
+        if not parts:
+            raise TestRailError("assigned_to is empty: give user IDs, 'me' or 'unassigned'.")
+        if len(parts) > MAX_ASSIGNEES:
+            raise TestRailError(f"assigned_to accepts at most {MAX_ASSIGNEES} entries.")
+        wanted: set[int | None] = set()
+        for part in parts:
+            word = part.lower() if isinstance(part, str) else None
+            if word == "me":
+                wanted.add(await current_user_id())
+            elif word in ("unassigned", "none"):
+                wanted.add(None)
+            else:
+                wanted.add(parse_id(part, "user"))
+        return wanted
 
     def single(obj: dict[str, Any], text_format: str) -> dict[str, Any]:
         """Keep a single-object response within the output budget (see sh.fit_object)."""
@@ -619,6 +688,7 @@ def register(reg: "Registry") -> None:
     async def get_tests(
         run_id: RunId,
         status: StatusFilter = None,
+        assigned_to: AssignedTo = None,
         limit: Limit = None,
         offset: Offset = 0,
         fetch_all: FetchAll = False,
@@ -627,22 +697,50 @@ def register(reg: "Registry") -> None:
         """List the tests in a run (each test = one case in that run) with current status.
 
         Use the returned test IDs with add_result/get_results, or the case_id with
-        add_result_for_case. Filter by status, e.g. status=['Untested', 'Retest'].
+        add_result_for_case. Filter by status, e.g. status=['Untested', 'Retest'], and by
+        assignee, e.g. assigned_to='me'.
         """
+        rid = parse_id(run_id, "run")
+        # Check the filters before listing anything (a bad assignee fails fast).
+        wanted: set[int | None] = set()  # never empty once resolved
+        if assigned_to is not None and assigned_to != []:
+            wanted = await resolve_assignees(assigned_to)
         statuses = await client.get_statuses() if status else []
         labels = await reg.status_labels()
-        return await list_page(
-            reg,
+        params: dict[str, Any] = {"status_id": resolve_status_filter(status, statuses)}
+
+        def shape(t: dict[str, Any]) -> dict[str, Any]:
+            return sh.with_status(sh.pick(t, sh.TEST_FIELDS), labels)
+
+        if not wanted:
+            return await list_page(
+                reg, "get_tests", rid, key="tests", shape=shape, params=params, limit=limit,
+                offset=offset, fetch_all=fetch_all, max_items=max_items,
+            )  # fmt: skip
+
+        if None not in wanted:
+            # Undocumented in TestRail's API reference but honored by current versions; it
+            # saves fetching everyone's tests. Older versions may ignore it, so every test
+            # is still checked below and paging is done here, on the filtered list.
+            params["assignedto_id"] = sorted(i for i in wanted if i is not None)
+        items, truncated = await client.get_all(
             "get_tests",
-            parse_id(run_id, "run"),
+            rid,
             key="tests",
-            shape=lambda t: sh.with_status(sh.pick(t, sh.TEST_FIELDS), labels),
-            params={"status_id": resolve_status_filter(status, statuses)},
-            limit=limit,
-            offset=offset,
-            fetch_all=fetch_all,
+            params={k: v for k, v in params.items() if v is not None},
             max_items=max_items,
         )
+        mine = [t for t in items if isinstance(t, dict) and t.get("assignedto_id") in wanted]
+        out = page_locally(
+            reg, mine, key="tests", shape=shape, limit=limit, offset=offset,
+            fetch_all_hint=False,
+        )  # fmt: skip
+        if truncated:
+            out["note"] = (
+                f"Stopped after {max_items} tests from TestRail; there may be more matching "
+                "tests. Raise max_items (up to 5000) or add a status filter."
+            )
+        return out
 
     @reg.read
     async def get_test(test_id: TestId, text_format: TextFormatParam = "markdown") -> dict:
@@ -935,6 +1033,14 @@ def register(reg: "Registry") -> None:
         return sh.pick(
             await client.get("get_user_by_email", params={"email": cleaned}), sh.USER_FIELDS
         )
+
+    @reg.read
+    async def get_current_user() -> dict:
+        """The TestRail user this server is logged in as ('me' in get_tests assigned_to)."""
+        user = await client.get("get_current_user")
+        if isinstance(user, dict) and isinstance(user.get("id"), int):
+            me["id"] = user["id"]
+        return sh.pick(user, (*sh.USER_FIELDS, "is_admin"))
 
     @reg.read
     async def get_configs(project_id: ProjectId) -> dict:

@@ -21,11 +21,12 @@ from pestrail.server import create_server
 
 from .conftest import API, make_config
 
-#: Ceilings for the full tools/list payload in compact JSON. Measured 2026-11-19: 34,958 /
-#: 24,455 (incl. text_format on get_case/get_test); before slimming 48,238 / 32,520.
-#: Raise deliberately, not by habit: every character here is paid in every conversation.
-MAX_WRITE_MODE_CHARS = 35_500
-MAX_READ_ONLY_CHARS = 24_800
+#: Ceilings for the full tools/list payload in compact JSON. Measured 2026-11-19: 35,489 /
+#: 24,986 (39 / 30 tools, after adding get_current_user and assigned_to); before slimming
+#: 48,238 / 32,520 (38 / 29 tools). Raise deliberately, not by habit: every character here
+#: is paid in every conversation.
+MAX_WRITE_MODE_CHARS = 36_000
+MAX_READ_ONLY_CHARS = 25_500
 
 #: Values tried against every parameter; both schemas must accept/reject each the same way.
 SAMPLES: list[Any] = [

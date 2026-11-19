@@ -76,14 +76,14 @@ def statuses(mock_api):
 def test_all_tools_registered_in_write_mode(mock_api):
     names = tool_names(build())
     assert names >= WRITE_TOOLS
-    assert len(names) == 38
+    assert len(names) == 39
 
 
 def test_read_only_mode_registers_no_write_tools(mock_api):
     names = tool_names(build(read_only=True))
     assert not (names & WRITE_TOOLS)
     assert all(n.startswith("get_") for n in names)
-    assert len(names) == 29
+    assert len(names) == 30
 
 
 def test_no_destructive_tool_names(mock_api):
