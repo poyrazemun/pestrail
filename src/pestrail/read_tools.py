@@ -71,7 +71,7 @@ CommentMaxChars = Annotated[
     ),
 ]
 FullComment = Annotated[bool, Field(description="Return comments uncut.")]
-CommentFormatParam = Annotated[
+TextFormatParam = Annotated[
     Literal["markdown", "raw"],
     Field(description="'markdown': rich-text HTML made readable. 'raw': as stored."),
 ]
@@ -139,6 +139,8 @@ def to_timestamp(value: int | str | None) -> int | None:
 
 #: Characters reserved for the response envelope (key names, paging block, notes).
 _ENVELOPE_CHARS = 600
+#: Characters reserved for the note added to a single object that had to be cut.
+_NOTE_RESERVE = 200
 
 
 def fit_to_budget(items: list[dict[str, Any]], budget: int) -> int:
@@ -264,6 +266,19 @@ async def list_page(
 
 def register(reg: "Registry") -> None:
     client = reg.client
+
+    def single(obj: dict[str, Any], text_format: str) -> dict[str, Any]:
+        """Keep a single-object response within the output budget (see sh.fit_object)."""
+        budget = reg.config.max_output_chars
+        fitted, cut = sh.fit_object(obj, budget - _NOTE_RESERVE)
+        if cut:
+            fitted["note"] = (
+                f"Long text fields were cut to stay within the output size budget ({budget} "
+                "characters)."
+            )
+            if text_format == "raw":
+                fitted["note"] += " text_format='markdown' is usually much shorter."
+        return fitted
 
     # ------------------------------------------------------------------ projects / suites
 
@@ -392,9 +407,13 @@ def register(reg: "Registry") -> None:
         )
 
     @reg.read
-    async def get_case(case_id: CaseId) -> dict:
-        """Get the full details of a test case, including steps and custom fields."""
-        return sh.full(await client.get("get_case", parse_id(case_id, "case")))
+    async def get_case(case_id: CaseId, text_format: TextFormatParam = "markdown") -> dict:
+        """Get the full details of a test case, including steps and custom fields.
+
+        Rich-text fields (description, steps, expected, preconditions) are made readable.
+        """
+        case = await client.get("get_case", parse_id(case_id, "case"))
+        return single(sh.detail(case, fmt=text_format), text_format)
 
     # ------------------------------------------------------------------ metadata
 
@@ -626,12 +645,14 @@ def register(reg: "Registry") -> None:
         )
 
     @reg.read
-    async def get_test(test_id: TestId) -> dict:
-        """Get one test (a case inside a run) with its current status and case details."""
+    async def get_test(test_id: TestId, text_format: TextFormatParam = "markdown") -> dict:
+        """Get one test (a case inside a run) with its current status and case details.
+
+        Rich-text fields are made readable, as in get_case.
+        """
         labels = await reg.status_labels()
-        return sh.with_status(
-            sh.full(await client.get("get_test", parse_id(test_id, "test"))), labels
-        )
+        test = await client.get("get_test", parse_id(test_id, "test"))
+        return single(sh.with_status(sh.detail(test, fmt=text_format), labels), text_format)
 
     # ------------------------------------------------------------------ results
 
@@ -645,7 +666,7 @@ def register(reg: "Registry") -> None:
         include_comments: IncludeComments = True,
         comment_max_chars: CommentMaxChars = sh.DEFAULT_COMMENT_CHARS,
         full_comment: FullComment = False,
-        comment_format: CommentFormatParam = "markdown",
+        comment_format: TextFormatParam = "markdown",
         result_id: Annotated[
             int | str | None,
             Field(
@@ -727,7 +748,7 @@ def register(reg: "Registry") -> None:
         include_comments: IncludeComments = True,
         comment_max_chars: CommentMaxChars = sh.DEFAULT_COMMENT_CHARS,
         full_comment: FullComment = False,
-        comment_format: CommentFormatParam = "markdown",
+        comment_format: TextFormatParam = "markdown",
     ) -> dict:
         """List results (newest first) for a case within a run. Comment options as in
         get_results."""
@@ -770,7 +791,7 @@ def register(reg: "Registry") -> None:
         include_comments: IncludeComments = True,
         comment_max_chars: CommentMaxChars = sh.DEFAULT_COMMENT_CHARS,
         full_comment: FullComment = False,
-        comment_format: CommentFormatParam = "markdown",
+        comment_format: TextFormatParam = "markdown",
     ) -> dict:
         """List all results added in a run (newest first). Comments as in get_results.
 
