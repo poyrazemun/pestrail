@@ -44,10 +44,11 @@ jobs:
           enable-cache: false # release builds never reuse a cache
       - name: Install (locked)
         run: uv sync --locked
-      - name: Lint, format check, tests
+      - name: Lint, format check, type check, tests
         run: |
           uv run ruff check .
           uv run ruff format --check .
+          uv run mypy
           uv run pytest
       - name: Build
         run: uv build --out-dir dist

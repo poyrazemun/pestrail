@@ -124,8 +124,11 @@ def test_lifespan_closes_http_client(mock_api):
     client = TestRailClient(config, sleep=_no_sleep)
     server = create_server(config, client)
 
+    lifespan = server.settings.lifespan
+    assert lifespan is not None
+
     async def session() -> None:
-        async with server.settings.lifespan(server):
+        async with lifespan(server):
             assert not client._http.is_closed
 
     asyncio.run(session())

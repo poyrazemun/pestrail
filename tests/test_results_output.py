@@ -20,7 +20,7 @@ from pestrail.client import TestRailClient
 from pestrail.config import DEFAULT_MAX_OUTPUT_CHARS, ConfigError, load_config
 from pestrail.server import create_server
 
-from .conftest import API, _no_sleep, make_config
+from .conftest import API, _no_sleep, make_config, text_of
 from .test_text import STYLE, styled
 
 STATUSES = [
@@ -57,9 +57,7 @@ def build(**overrides: Any):
 
 
 def call_text(server, name: str, args: dict[str, Any]) -> str:
-    result = asyncio.run(server.call_tool(name, args))
-    assert not result.is_error, result
-    return result.content[0].text
+    return text_of(asyncio.run(server.call_tool(name, args)))
 
 
 @pytest.fixture

@@ -17,6 +17,7 @@ import pytest
 
 from pestrail import shaping as sh
 from pestrail.client import TestRailClient
+from pestrail.serialize import to_json_text
 from pestrail.server import create_server
 
 from .conftest import API, _no_sleep, make_config
@@ -201,7 +202,7 @@ def test_fit_object_cuts_only_the_longest_fields():
     obj = {"id": 1, "title": "kept whole " * 30, "a": "a" * 20_000, "b": "b" * 8_000}
     fitted, cut = sh.fit_object(obj, 10_000)
     assert cut
-    assert len(sh.to_json_text(fitted)) <= 10_000
+    assert len(to_json_text(fitted)) <= 10_000
     assert fitted["title"] == obj["title"]
     assert fitted["a"].endswith("[truncated, 20000 chars total]")
     assert fitted["b"].endswith("[truncated, 8000 chars total]")

@@ -218,7 +218,7 @@ def register(reg: Registry) -> None:
             client, reg.config, known_result_runs=known_result_runs, **kwargs
         )
 
-    async def _upload(method: str, *ids: int | str, file_path: str) -> dict:
+    async def _upload(method: str, *ids: int | str, file_path: str) -> dict[str, Any]:
         resolved = await _check_file(file_path)
         data = await client.upload(method, *ids, file_path=resolved)
         size_bytes = await asyncio.to_thread(lambda: resolved.stat().st_size)
@@ -240,7 +240,7 @@ def register(reg: Registry) -> None:
         version: Version = None,
         assigned_to_id: AssignedTo = None,
         custom_fields: CustomFields = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Add a new result to a test (a case inside a run), identified by test ID.
 
         If you only know the run and case IDs, use add_result_for_case. Fails if the run is
@@ -273,7 +273,7 @@ def register(reg: Registry) -> None:
         version: Version = None,
         assigned_to_id: AssignedTo = None,
         custom_fields: CustomFields = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Add a new result for a case in a run, e.g. "mark C1234 in R56 as Failed".
 
         The case must be in the run (see get_tests); fails if the run is closed. To attach
@@ -308,7 +308,7 @@ def register(reg: Registry) -> None:
                 description="One entry per case.",
             ),
         ],
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Add results for many cases in one run in one request: the main tool for
         reporting a test session.
 
@@ -382,7 +382,7 @@ def register(reg: Registry) -> None:
                 "allowlists, for a result not added in this session (it is verified)."
             ),
         ] = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Upload a local file (log, screenshot, report) and attach it to an existing result.
 
         Result IDs come from the add_result* tools or get_results / get_results_for_run.
@@ -391,14 +391,14 @@ def register(reg: Registry) -> None:
         return await _upload("add_attachment_to_result", result_id, file_path=file_path)
 
     @reg.write
-    async def add_attachment_to_run(run_id: RunId, file_path: FilePath) -> dict:
+    async def add_attachment_to_run(run_id: RunId, file_path: FilePath) -> dict[str, Any]:
         """Upload a local file and attach it to a test run (e.g. a full test report)."""
         rid = parse_id(run_id, "run")
         await _scope(run_id=rid)
         return await _upload("add_attachment_to_run", rid, file_path=file_path)
 
     @reg.write
-    async def add_attachment_to_case(case_id: CaseId, file_path: FilePath) -> dict:
+    async def add_attachment_to_case(case_id: CaseId, file_path: FilePath) -> dict[str, Any]:
         """Upload a local file and attach it to a test case. This does not change the case's
         fields; it only adds an attachment."""
         cid = parse_id(case_id, "case")
@@ -406,7 +406,7 @@ def register(reg: Registry) -> None:
         return await _upload("add_attachment_to_case", cid, file_path=file_path)
 
     @reg.write
-    async def add_attachment_to_plan(plan_id: PlanId, file_path: FilePath) -> dict:
+    async def add_attachment_to_plan(plan_id: PlanId, file_path: FilePath) -> dict[str, Any]:
         """Upload a local file and attach it to a test plan."""
         pid = parse_id(plan_id, "plan")
         await _scope(plan_id=pid)
@@ -420,7 +420,7 @@ def register(reg: Registry) -> None:
             Field(description="Plan entry ID (a GUID like '3933d74b-...'); see get_plan entries."),
         ],
         file_path: FilePath,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Upload a local file and attach it to an entry (group of runs) in a test plan."""
         pid = parse_id(plan_id, "plan")
         await _scope(plan_id=pid)
@@ -452,7 +452,7 @@ def register(reg: Registry) -> None:
         version: Version = None,
         assigned_to_id: AssignedTo = None,
         custom_fields: CustomFields = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Add a result for a case in a run, then upload files to it.
 
         All files are checked before the result is created, so a bad path creates nothing.

@@ -93,7 +93,7 @@ class StdioServer:
             except queue.Empty:
                 pytest.fail(f"No response to {method} within {TIMEOUT}s. stderr:\n{self.stderr()}")
             # Every stdout line must be a JSON-RPC message; anything else corrupts the stream.
-            message = json.loads(line)
+            message: dict[str, Any] = json.loads(line)
             assert message.get("jsonrpc") == "2.0", line
             if message.get("id") == msg_id:
                 return message

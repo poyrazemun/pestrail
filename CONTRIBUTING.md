@@ -11,6 +11,7 @@ uv sync                # runtime + dev dependencies
 uv run pytest          # unit tests (HTTP fully mocked) + stdio smoke tests
 uv run ruff check .    # lint
 uv run ruff format .   # format
+uv run mypy            # type check (settings in pyproject.toml)
 ```
 
 The tests never contact a real TestRail instance. All HTTP is mocked with
@@ -33,5 +34,5 @@ pestrail's value is its safety model ([docs/safety.md](docs/safety.md)), so:
   the write-scope check (`scope.py`), and stay hidden in read-only mode.
 - New API methods must exist in the real TestRail API. Test fixtures should mirror real
   response shapes.
-- Add tests for every behavior change, and make sure `pytest`, `ruff check` and
-  `ruff format --check` pass.
+- Add tests for every behavior change, and make sure `pytest`, `ruff check`,
+  `ruff format --check` and `mypy` pass.

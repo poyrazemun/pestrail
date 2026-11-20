@@ -11,7 +11,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from pestrail.client import TestRailClient
 from pestrail.server import create_server
 
-from .conftest import API, _no_sleep, make_config
+from .conftest import API, _no_sleep, make_config, text_of
 
 
 @pytest.mark.parametrize("email", ["@", "a@", "@b", "no-at", "a@b", "a @b.c", ""])
@@ -33,4 +33,4 @@ def test_valid_email_accepted(mock_api):
     config = make_config()
     server = create_server(config, TestRailClient(config, sleep=_no_sleep))
     result = asyncio.run(server.call_tool("get_user_by_email", {"email": " a@example.invalid "}))
-    assert not result.is_error
+    text_of(result)  # succeeded

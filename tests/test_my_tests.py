@@ -20,7 +20,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from pestrail.client import READ_METHODS, WRITE_METHODS, TestRailClient
 from pestrail.server import create_server
 
-from .conftest import API, _no_sleep, make_config
+from .conftest import API, _no_sleep, make_config, text_of
 
 ME = {"id": 19, "name": "QA Person", "email": "qa@example.invalid", "is_active": True,
       "role_id": 3, "role": "Tester", "is_admin": False, "mfa_required": False,
@@ -81,9 +81,8 @@ def build(**overrides: Any):
 
 
 def call(server, name: str, args: dict[str, Any]) -> dict[str, Any]:
-    result = asyncio.run(server.call_tool(name, args))
-    assert not result.is_error, result
-    return json.loads(result.content[0].text)
+    out: dict[str, Any] = json.loads(text_of(asyncio.run(server.call_tool(name, args))))
+    return out
 
 
 def owners(out: dict[str, Any]) -> set[Any]:

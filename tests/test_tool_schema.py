@@ -195,3 +195,11 @@ def test_status_list_in_any_form_filters_by_both(mock_api, status):
     )
     asyncio.run(_server(read_only=True).call_tool("get_tests", {"run_id": "650", "status": status}))
     assert str(tests.calls.last.request.url).endswith("get_tests/650&status_id=5,4")
+
+
+def test_tools_advertise_no_output_schema():
+    # Tools return ready-made compact JSON text. If the SDK derived output schemas from the
+    # return annotations (it does for dict[str, Any] unless structured_output=False), every
+    # definition would grow and results would be validated against them.
+    for tool in asyncio.run(_server(read_only=False).list_tools()):
+        assert tool.output_schema is None, tool.name

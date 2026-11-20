@@ -125,7 +125,7 @@ def to_timestamp(value: int | str | None) -> int | None:
     else:
         text = str(value).strip()
         if len(text) > 64:
-            raise TestRailError(f"Invalid date {value[:20]!r}...: too long.")
+            raise TestRailError(f"Invalid date {text[:20]!r}...: too long.")
         if _TIMESTAMP_RE.fullmatch(text):
             ts = int(text)
         else:
@@ -354,7 +354,7 @@ def register(reg: "Registry") -> None:
     @reg.read
     async def get_projects(
         is_completed: OptBool = None, limit: Limit = None, offset: Offset = 0
-    ) -> dict:
+    ) -> dict[str, Any]:
         """List TestRail projects. Start here to find a project_id.
 
         is_completed: true = only completed (archived) projects, false = only active ones.
@@ -372,19 +372,19 @@ def register(reg: "Registry") -> None:
         )
 
     @reg.read
-    async def get_project(project_id: ProjectId) -> dict:
+    async def get_project(project_id: ProjectId) -> dict[str, Any]:
         """Get one project's details by ID."""
         return sh.full(await client.get("get_project", parse_id(project_id, "project")))
 
     @reg.read
-    async def get_suites(project_id: ProjectId) -> dict:
+    async def get_suites(project_id: ProjectId) -> dict[str, Any]:
         """List the test suites in a project. Use the suite IDs with get_sections/get_cases."""
         data = await client.get("get_suites", parse_id(project_id, "project"))
         items = data.get("suites", []) if isinstance(data, dict) else data
         return {"suites": [sh.pick(s, sh.SUITE_FIELDS) for s in items or []]}
 
     @reg.read
-    async def get_suite(suite_id: SuiteId) -> dict:
+    async def get_suite(suite_id: SuiteId) -> dict[str, Any]:
         """Get one test suite by ID."""
         return sh.full(await client.get("get_suite", parse_id(suite_id, "suite")))
 
@@ -396,7 +396,7 @@ def register(reg: "Registry") -> None:
         offset: Offset = 0,
         fetch_all: FetchAll = False,
         max_items: MaxItems = 1000,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """List sections (folders) of a suite. parent_id/depth describe the tree.
 
         Use section IDs to filter get_cases. suite_id is required for multi-suite projects.
@@ -444,7 +444,7 @@ def register(reg: "Registry") -> None:
         offset: Offset = 0,
         fetch_all: FetchAll = False,
         max_items: MaxItems = 1000,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """List test cases in a project/suite with optional filters (compact fields only).
 
         Use get_case for a case's full details (steps, expected results, custom fields).
@@ -476,7 +476,9 @@ def register(reg: "Registry") -> None:
         )
 
     @reg.read
-    async def get_case(case_id: CaseId, text_format: TextFormatParam = "markdown") -> dict:
+    async def get_case(
+        case_id: CaseId, text_format: TextFormatParam = "markdown"
+    ) -> dict[str, Any]:
         """Get the full details of a test case, including steps and custom fields.
 
         Rich-text fields (description, steps, expected, preconditions) are made readable.
@@ -507,12 +509,12 @@ def register(reg: "Registry") -> None:
         return out
 
     @reg.read
-    async def get_case_fields() -> dict:
+    async def get_case_fields() -> dict[str, Any]:
         """List the case fields (system and custom) configured on this TestRail instance."""
         return {"case_fields": [_field(f) for f in await client.get("get_case_fields") or []]}
 
     @reg.read
-    async def get_result_fields() -> dict:
+    async def get_result_fields() -> dict[str, Any]:
         """List the custom result fields available when adding results.
 
         Pass them to the add_result* tools in custom_fields, keyed by system_name
@@ -523,7 +525,7 @@ def register(reg: "Registry") -> None:
         return {"result_fields": [_field(f) for f in await client.get("get_result_fields") or []]}
 
     @reg.read
-    async def get_statuses() -> dict:
+    async def get_statuses() -> dict[str, Any]:
         """List result statuses (IDs, names, labels), including custom statuses.
 
         Result tools accept either the ID or the name/label. 'Untested' (is_untested=true)
@@ -538,7 +540,7 @@ def register(reg: "Registry") -> None:
         }
 
     @reg.read
-    async def get_priorities() -> dict:
+    async def get_priorities() -> dict[str, Any]:
         """List case priorities (IDs for the priority_id filter of get_cases)."""
         data = await client.get("get_priorities") or []
         return {
@@ -556,7 +558,7 @@ def register(reg: "Registry") -> None:
         is_started: OptBool = None,
         limit: Limit = None,
         offset: Offset = 0,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """List milestones in a project."""
         return await list_page(
             reg,
@@ -570,7 +572,7 @@ def register(reg: "Registry") -> None:
         )
 
     @reg.read
-    async def get_milestone(milestone_id: MilestoneId) -> dict:
+    async def get_milestone(milestone_id: MilestoneId) -> dict[str, Any]:
         """Get one milestone by ID."""
         return sh.full(await client.get("get_milestone", parse_id(milestone_id, "milestone")))
 
@@ -590,7 +592,7 @@ def register(reg: "Registry") -> None:
         offset: Offset = 0,
         fetch_all: FetchAll = False,
         max_items: MaxItems = 1000,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """List test plans in a project. Use get_plan to see the runs inside a plan."""
         params = {
             "is_completed": is_completed,
@@ -613,7 +615,7 @@ def register(reg: "Registry") -> None:
         )
 
     @reg.read
-    async def get_plan(plan_id: PlanId) -> dict:
+    async def get_plan(plan_id: PlanId) -> dict[str, Any]:
         """Get a test plan with its entries and the runs inside each entry.
 
         Each entry has an id (a GUID, used by add_attachment_to_plan_entry) and runs;
@@ -650,7 +652,7 @@ def register(reg: "Registry") -> None:
         offset: Offset = 0,
         fetch_all: FetchAll = False,
         max_items: MaxItems = 1000,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """List test runs in a project (with pass/fail counts).
 
         Note: runs that are part of a test plan are NOT returned here; use get_plans + get_plan.
@@ -678,7 +680,7 @@ def register(reg: "Registry") -> None:
         )
 
     @reg.read
-    async def get_run(run_id: RunId) -> dict:
+    async def get_run(run_id: RunId) -> dict[str, Any]:
         """Get one test run, including its status counts and whether it is completed (closed)."""
         return sh.full(await client.get("get_run", parse_id(run_id, "run")))
 
@@ -693,7 +695,7 @@ def register(reg: "Registry") -> None:
         offset: Offset = 0,
         fetch_all: FetchAll = False,
         max_items: MaxItems = 1000,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """List the tests in a run (each test = one case in that run) with current status.
 
         Use the returned test IDs with add_result/get_results, or the case_id with
@@ -743,7 +745,9 @@ def register(reg: "Registry") -> None:
         return out
 
     @reg.read
-    async def get_test(test_id: TestId, text_format: TextFormatParam = "markdown") -> dict:
+    async def get_test(
+        test_id: TestId, text_format: TextFormatParam = "markdown"
+    ) -> dict[str, Any]:
         """Get one test (a case inside a run) with its current status and case details.
 
         Rich-text fields are made readable, as in get_case.
@@ -772,7 +776,7 @@ def register(reg: "Registry") -> None:
                 "With full_comment=true, reads one comment in full."
             ),
         ] = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """List results (newest first) for a test in a run.
 
         Comments are rich-text HTML made readable and cut at comment_max_chars (default
@@ -847,7 +851,7 @@ def register(reg: "Registry") -> None:
         comment_max_chars: CommentMaxChars = sh.DEFAULT_COMMENT_CHARS,
         full_comment: FullComment = False,
         comment_format: TextFormatParam = "markdown",
-    ) -> dict:
+    ) -> dict[str, Any]:
         """List results (newest first) for a case within a run. Comment options as in
         get_results."""
         statuses = await client.get_statuses() if status else []
@@ -890,7 +894,7 @@ def register(reg: "Registry") -> None:
         comment_max_chars: CommentMaxChars = sh.DEFAULT_COMMENT_CHARS,
         full_comment: FullComment = False,
         comment_format: TextFormatParam = "markdown",
-    ) -> dict:
+    ) -> dict[str, Any]:
         """List all results added in a run (newest first). Comments as in get_results.
 
         Large responses are cut to the output size budget; continue with paging.next_offset.
@@ -931,7 +935,7 @@ def register(reg: "Registry") -> None:
     @reg.read
     async def get_attachments_for_case(
         case_id: CaseId, limit: Limit = None, offset: Offset = 0
-    ) -> dict:
+    ) -> dict[str, Any]:
         """List attachments on a test case (metadata only, not file contents)."""
         return await list_page(
             reg,
@@ -944,7 +948,7 @@ def register(reg: "Registry") -> None:
         )
 
     @reg.read
-    async def get_attachments_for_test(test_id: TestId) -> dict:
+    async def get_attachments_for_test(test_id: TestId) -> dict[str, Any]:
         """List attachments on a test's results (metadata only). Use get_tests to find test IDs."""
         return await list_page(
             reg,
@@ -957,7 +961,7 @@ def register(reg: "Registry") -> None:
     @reg.read
     async def get_attachments_for_run(
         run_id: RunId, limit: Limit = None, offset: Offset = 0
-    ) -> dict:
+    ) -> dict[str, Any]:
         """List attachments on a test run (metadata only)."""
         return await list_page(
             reg,
@@ -972,7 +976,7 @@ def register(reg: "Registry") -> None:
     @reg.read
     async def get_attachments_for_plan(
         plan_id: PlanId, limit: Limit = None, offset: Offset = 0
-    ) -> dict:
+    ) -> dict[str, Any]:
         """List attachments on a test plan (metadata only)."""
         return await list_page(
             reg,
@@ -1002,7 +1006,7 @@ def register(reg: "Registry") -> None:
             ),
         ] = False,
         max_items: MaxItems = 1000,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """List users (id, name, email). Use a user's id as assigned_to_id in result tools.
 
         To find one person, get_user_by_email is cheaper.
@@ -1025,7 +1029,7 @@ def register(reg: "Registry") -> None:
         email: Annotated[
             str, Field(max_length=MAX_EMAIL_CHARS, description="The user's email address.")
         ],
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Look up a single user by email address (to get the ID for assigned_to_id)."""
         cleaned = email.strip()
         if len(cleaned) > MAX_EMAIL_CHARS or not _EMAIL_RE.fullmatch(cleaned):
@@ -1035,7 +1039,7 @@ def register(reg: "Registry") -> None:
         )
 
     @reg.read
-    async def get_current_user() -> dict:
+    async def get_current_user() -> dict[str, Any]:
         """The TestRail user this server is logged in as ('me' in get_tests assigned_to)."""
         user = await client.get("get_current_user")
         if isinstance(user, dict) and isinstance(user.get("id"), int):
@@ -1043,7 +1047,7 @@ def register(reg: "Registry") -> None:
         return sh.pick(user, (*sh.USER_FIELDS, "is_admin"))
 
     @reg.read
-    async def get_configs(project_id: ProjectId) -> dict:
+    async def get_configs(project_id: ProjectId) -> dict[str, Any]:
         """List configuration groups and options (e.g. Browsers: Chrome, Firefox) of a project.
 
         Runs inside test plans can be per-configuration; get_plan shows each run's config.

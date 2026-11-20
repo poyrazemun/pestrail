@@ -75,12 +75,14 @@ def _forbid_extra(model: type[ArgModelT], tool: str) -> type[ArgModelT]:
     """
     allowed = {field.alias or name for name, field in model.model_fields.items()}
 
-    def reject_unknown(cls: type[BaseModel], data: Any) -> Any:
-        if isinstance(data, dict):
-            unknown = sorted(str(key) for key in data if key not in allowed)
+    # (cls, value) is pydantic's "before" model-validator signature; pydantic makes it a
+    # classmethod itself because the first parameter is named cls.
+    def reject_unknown(cls: Any, value: Any) -> Any:
+        if isinstance(value, dict):
+            unknown = sorted(str(key) for key in value if key not in allowed)
             if unknown:
                 raise ValueError(_unknown_arguments_message(tool, unknown, allowed))
-        return data
+        return value
 
     # Same name as the original, so validation errors still name the tool.
     strict: type[ArgModelT] = type(
@@ -89,7 +91,7 @@ def _forbid_extra(model: type[ArgModelT], tool: str) -> type[ArgModelT]:
         {
             "model_config": ConfigDict(extra="forbid"),
             "__module__": model.__module__,
-            "_reject_unknown": model_validator(mode="before")(classmethod(reject_unknown)),
+            "_reject_unknown": model_validator(mode="before")(reject_unknown),
         },
     )
     return strict
@@ -116,7 +118,10 @@ class Registry:
             # would pretty-print (indent=2); we emit compact JSON, one list item per line.
             return TextContent(type="text", text=to_json_text(result))
 
-        self.mcp.tool(annotations=annotations)(wrapper)
+        # structured_output=False: tools return ready-made compact JSON text (above), so the
+        # SDK must not derive an output schema from the return type (it would add one to
+        # every tool definition and validate results against it).
+        self.mcp.tool(annotations=annotations, structured_output=False)(wrapper)
         tool = self.mcp._tool_manager.get_tool(fn.__name__)
         if tool is None:  # pragma: no cover - SDK internals changed; caught by tests
             raise RuntimeError(f"tool {fn.__name__!r} was not registered")
