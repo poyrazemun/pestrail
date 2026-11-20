@@ -101,6 +101,9 @@ jobs:
         with:
           name: dist
           path: dist/
+      # The Claude Desktop extension pins pestrail==VERSION, which now exists on PyPI.
+      - name: Build Claude Desktop extension (.mcpb)
+        run: python3 .github/scripts/build_mcpb.py "$RUNNER_TEMP/mcpb"
       - name: Create draft release with CHANGELOG notes
         env:
           GH_TOKEN: ${{ github.token }}
@@ -109,5 +112,5 @@ jobs:
           VERSION: ${{ needs.build.outputs.version }}
         run: |
           python3 .github/scripts/release_check.py notes "$VERSION" > "$RUNNER_TEMP/notes.md"
-          gh release create "$TAG" dist/* --draft --verify-tag \
-            --title "pestrail $VERSION" --notes-file "$RUNNER_TEMP/notes.md"
+          gh release create "$TAG" dist/* "$RUNNER_TEMP/mcpb/pestrail-$VERSION.mcpb" \
+            --draft --verify-tag --title "pestrail $VERSION" --notes-file "$RUNNER_TEMP/notes.md"

@@ -303,7 +303,7 @@ def real_shape_results(count: int) -> list[dict[str, Any]]:
                 "comment": None if kind == 3 else styled("Checked on build 4.2.1"),
                 "version": None,
                 "elapsed": None,
-                "defects": "BEAMR-286" if kind == 2 else None,
+                "defects": "JIRA-286" if kind == 2 else None,
                 "created_by": 19 + i % 2,
                 "custom_step_results": None,
                 "attachment_ids": [900 + i] if kind == 1 else [],
@@ -322,7 +322,7 @@ def test_empty_fields_are_left_out(mock_api, statuses):
         assert all(value not in (None, "", []) for value in result.values())
     assert "defects" not in passed and "attachment_ids" not in passed
     assert with_attachment["attachment_ids"] == [901]
-    assert failed["defects"] == "BEAMR-286" and failed["status"] == "Failed"
+    assert failed["defects"] == "JIRA-286" and failed["status"] == "Failed"
     # Assignment-only entry: no status and no comment, just who/when/assignee.
     assert set(assignment) == {"id", "test_id", "assignedto_id", "created_by", "created_on"}
 
