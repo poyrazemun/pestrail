@@ -21,3 +21,11 @@ response:
 - make pestrail send credentials to an unintended host.
 
 The design is described in [docs/safety.md](docs/safety.md).
+
+## Releases
+
+Releases after 0.2.0 are built, tested and uploaded to PyPI by the
+[release workflow](.github/workflows/release.yml) on GitHub Actions, from the tagged commit
+on `main`. It uses PyPI Trusted Publishing, so no PyPI API token exists, and each file
+comes with a signed attestation: its PyPI page shows the repository and workflow that
+built it.
