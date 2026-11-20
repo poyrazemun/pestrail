@@ -37,7 +37,13 @@ paged to fit your MCP client's limits.
    [PyPI](https://pypi.org/project/pestrail/), so `uvx pestrail` downloads and runs it; check with `uvx pestrail --version`.
 3. **Add it to your MCP client.** Start read-only and enable writes later.
 
-**Claude Desktop:** open **Settings > Desktop app > Extensions > Manage > Edit Config**, add the block below, then
+**Claude Desktop, as an extension (easiest):** download `pestrail-X.Y.Z.mcpb` from the
+[latest release](https://github.com/poyrazemun/pestrail/releases/latest) and open it with
+Claude Desktop. Fill in the form: TestRail URL, username, API key (stored securely),
+**Read-only** (on by default) and, for writes, the **Attachment folders** uploads may come
+from. It installs the matching pestrail release from PyPI.
+
+**Claude Desktop, by hand:** open **Settings > Desktop app > Extensions > Manage > Edit Config**, add the block below, then
 quit Claude Desktop completely and start it again.
 
 ```json

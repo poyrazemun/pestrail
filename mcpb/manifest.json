@@ -1,0 +1,84 @@
+{
+  "manifest_version": "0.4",
+  "name": "pestrail",
+  "display_name": "pestrail (TestRail)",
+  "version": "0.3.0",
+  "description": "Safety-first TestRail access: browse projects, cases, runs and plans, add results and attachments. It cannot delete anything.",
+  "long_description": "pestrail lets Claude do day-to-day QA work in TestRail: find runs and tests (including the ones assigned to you), read cases and results as readable text, and add results with attachments. It cannot delete anything, cannot create, edit or move cases, suites or sections, and cannot close runs or plans. Read-only mode (on by default) hides every write tool. Uploads are limited to the attachment folders you choose. Installs the matching pestrail release from PyPI. Community project, not affiliated with or endorsed by TestRail, Gurock Software or Idera, Inc.",
+  "author": {
+    "name": "pestrail contributors",
+    "url": "https://github.com/poyrazemun/pestrail"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/poyrazemun/pestrail"
+  },
+  "homepage": "https://github.com/poyrazemun/pestrail",
+  "documentation": "https://github.com/poyrazemun/pestrail#readme",
+  "support": "https://github.com/poyrazemun/pestrail/issues",
+  "license": "MIT",
+  "keywords": ["testrail", "qa", "testing", "test-management"],
+  "server": {
+    "type": "uv",
+    "entry_point": "server/main.py",
+    "mcp_config": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--directory",
+        "${__dirname}",
+        "server/main.py",
+        "--attachment-roots",
+        "${user_config.attachment_roots}"
+      ],
+      "env": {
+        "TESTRAIL_URL": "${user_config.testrail_url}",
+        "TESTRAIL_USERNAME": "${user_config.testrail_username}",
+        "TESTRAIL_API_KEY": "${user_config.testrail_api_key}",
+        "TESTRAIL_READ_ONLY": "${user_config.read_only}",
+        "PESTRAIL_ENV_FILE": "none"
+      }
+    }
+  },
+  "tools_generated": true,
+  "compatibility": {
+    "platforms": ["darwin", "win32", "linux"],
+    "runtimes": {
+      "python": ">=3.11"
+    }
+  },
+  "user_config": {
+    "testrail_url": {
+      "type": "string",
+      "title": "TestRail URL",
+      "description": "Your TestRail address, e.g. https://your-company.testrail.io (https only).",
+      "required": true
+    },
+    "testrail_username": {
+      "type": "string",
+      "title": "TestRail username",
+      "description": "The email address you log in to TestRail with.",
+      "required": true
+    },
+    "testrail_api_key": {
+      "type": "string",
+      "title": "TestRail API key",
+      "description": "Create one in TestRail: My Settings > API Keys. Stored securely, never shown to Claude.",
+      "required": true,
+      "sensitive": true
+    },
+    "read_only": {
+      "type": "boolean",
+      "title": "Read-only",
+      "description": "On: Claude can only read. Turn off to let Claude add results and attachments (then choose attachment folders below).",
+      "default": true
+    },
+    "attachment_roots": {
+      "type": "directory",
+      "title": "Attachment folders",
+      "description": "Folders Claude may upload files from (logs, screenshots, reports). Required when read-only is off; nothing outside them can be uploaded.",
+      "multiple": true,
+      "required": false
+    }
+  }
+}

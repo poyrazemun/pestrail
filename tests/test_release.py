@@ -37,12 +37,30 @@ CHANGELOG = """# Changelog
 """
 
 
-def make_repo(tmp_path: Path, version: str = "0.3.0", changelog: str = CHANGELOG) -> Path:
+def make_repo(
+    tmp_path: Path,
+    version: str = "0.3.0",
+    changelog: str = CHANGELOG,
+    *,
+    bundle_version: str | None = None,
+    pin: str | None = None,
+) -> Path:
     (tmp_path / "src" / "pestrail").mkdir(parents=True)
     (tmp_path / "src" / "pestrail" / "__init__.py").write_text(
         f'"""pestrail."""\n\n__version__ = "{version}"\n', encoding="utf-8"
     )
     (tmp_path / "CHANGELOG.md").write_text(changelog, encoding="utf-8")
+    bundle = tmp_path / "mcpb"
+    bundle.mkdir()
+    bundle_version = bundle_version or version
+    (bundle / "manifest.json").write_text(
+        f'{{"name": "pestrail", "version": "{bundle_version}"}}', encoding="utf-8"
+    )
+    (bundle / "pyproject.toml").write_text(
+        f'[project]\nname = "pestrail-mcpb"\nversion = "{bundle_version}"\n'
+        f'dependencies = ["{pin or "pestrail==" + version}"]\n',
+        encoding="utf-8",
+    )
     return tmp_path
 
 
@@ -65,6 +83,20 @@ def test_matching_tag_passes(tmp_path):
 def test_bad_release_is_refused(tmp_path, tag, version, changelog, message):
     with pytest.raises(rc.ReleaseError, match=message):
         rc.check(tag, make_repo(tmp_path, version, changelog))
+
+
+@pytest.mark.parametrize(
+    ("bundle_version", "pin", "message"),
+    [
+        ("0.2.0", None, "manifest.json version is '0.2.0'"),
+        (None, "pestrail==0.2.0", "dependencies are"),
+        (None, "pestrail>=0.3.0", "dependencies are"),  # must be an exact pin
+    ],
+)
+def test_extension_bundle_must_match_the_version(tmp_path, bundle_version, pin, message):
+    repo = make_repo(tmp_path, bundle_version=bundle_version, pin=pin)
+    with pytest.raises(rc.ReleaseError, match=message):
+        rc.check("v0.3.0", repo)
 
 
 def test_notes_are_the_section_plus_disclaimer(tmp_path):

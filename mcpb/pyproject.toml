@@ -1,0 +1,10 @@
+# Claude Desktop extension (MCP Bundle) for pestrail. Not a Python package: Claude Desktop
+# runs server/main.py with uv, which installs the pinned pestrail release from PyPI.
+# The pin and manifest.json's "version" must equal pestrail's __version__ (checked by
+# .github/scripts/release_check.py before every release).
+[project]
+name = "pestrail-mcpb"
+version = "0.3.0"
+description = "Claude Desktop extension for pestrail (installs pestrail from PyPI)"
+requires-python = ">=3.11"
+dependencies = ["pestrail==0.3.0"]

@@ -25,19 +25,19 @@ from .test_text import styled
 
 STATUSES = [{"id": 5, "name": "failed", "label": "Failed", "is_untested": False}]
 
-DESCRIPTION = styled("JIRA Ticket: latency estimation") + (
-    "<h3>Measurement modes</h3>"
+DESCRIPTION = styled("Ticket: login timeout handling") + (
+    "<h3>Supported modes</h3>"
     "<table><tr><th>Mode</th><th>Value</th></tr>"
-    "<tr><td>Disabled</td><td>0</td></tr><tr><td>Aggregated</td><td>1</td></tr></table>"
+    "<tr><td>Off</td><td>0</td></tr><tr><td>Basic</td><td>1</td></tr></table>"
 )
-STEPS = styled("Run one of these commands") + "<pre>docker run --rm gst-launch-1.0 -q</pre>"
+STEPS = styled("Run one of these commands") + "<pre>./run-tests.sh --suite smoke</pre>"
 EXPECTED = styled("Output should contain <strong>summary</strong>")
 
 
 def real_shape_case(**overrides: Any) -> dict[str, Any]:
     case = {
         "id": 45207,
-        "title": "Latency estimation",
+        "title": "Login timeout",
         "section_id": 10,
         "template_id": 1,
         "type_id": 7,
@@ -90,12 +90,10 @@ def test_rich_text_fields_are_readable(mock_api):
     mock_case(mock_api, real_shape_case())
     _, out = call(build(), "get_case", {"case_id": "C45207"})
     assert out["custom_description"] == (
-        "JIRA Ticket: latency estimation\n\n### Measurement modes\n\n"
-        "Mode | Value\nDisabled | 0\nAggregated | 1"
+        "Ticket: login timeout handling\n\n### Supported modes\n\nMode | Value\nOff | 0\nBasic | 1"
     )
     assert (
-        out["custom_steps"]
-        == "Run one of these commands\n\n```\ndocker run --rm gst-launch-1.0 -q\n```"
+        out["custom_steps"] == "Run one of these commands\n\n```\n./run-tests.sh --suite smoke\n```"
     )
     assert out["custom_expected"] == "Output should contain **summary**"
     assert "style" not in json.dumps(out)
@@ -142,7 +140,7 @@ def test_separated_steps_are_readable(mock_api):
 
 def test_markdown_shrinks_a_case_that_raw_would_cut(mock_api):
     # Like the real 50,752-character case: ~24k of styling in each of two fields.
-    big = styled(*(["Average latency per frame. "] * 24))
+    big = styled(*(["Session expires after the configured timeout. "] * 24))
     mock_case(mock_api, real_shape_case(custom_description=big, custom_expected=big))
     server = build()
 
@@ -155,7 +153,7 @@ def test_markdown_shrinks_a_case_that_raw_would_cut(mock_api):
     for key in ("custom_description", "custom_expected"):
         assert out[key].startswith(big[:200])
         assert out[key].endswith(f"... [truncated, {len(big)} chars total]")
-    assert out["title"] == "Latency estimation"  # short fields are never cut
+    assert out["title"] == "Login timeout"  # short fields are never cut
 
 
 def test_oversized_markdown_case_is_cut_to_budget(mock_api):
@@ -177,7 +175,7 @@ def test_get_test_is_readable_with_status(mock_api, statuses):
         "case_id": 46468,
         "run_id": 650,
         "status_id": 5,
-        "title": "SDK documentation check",
+        "title": "Documentation check",
         "assignedto_id": 13,
         "refs": None,
         "custom_description": DESCRIPTION,
@@ -186,7 +184,7 @@ def test_get_test_is_readable_with_status(mock_api, statuses):
     mock_api.get(API + "get_test/73922").mock(return_value=httpx.Response(200, json=test))
     _, out = call(build(), "get_test", {"test_id": "T73922"})
     assert out["status"] == "Failed"
-    assert out["custom_description"].startswith("JIRA Ticket: latency estimation")
+    assert out["custom_description"].startswith("Ticket: login timeout handling")
     assert "refs" not in out and "custom_preconds" not in out
 
 
