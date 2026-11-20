@@ -24,105 +24,76 @@ _TIMESTAMP_RE = re.compile(r"[0-9]{1,12}")
 
 # --------------------------------------------------------------------------- parameter types
 
-ProjectId = Annotated[
-    int | str, Field(description="Project ID, e.g. 1 or 'P1'. Use get_projects to find it.")
-]
-SuiteId = Annotated[
-    int | str, Field(description="Suite ID, e.g. 3 or 'S3'. Use get_suites to find it.")
-]
+ProjectId = Annotated[int | str, Field(description="Project ID, e.g. 1 or 'P1'.")]
+SuiteId = Annotated[int | str, Field(description="Suite ID, e.g. 3 or 'S3'.")]
 OptSuiteId = Annotated[
     int | str | None,
-    Field(
-        description="Suite ID (e.g. 3 or 'S3'). Required for projects with multiple suites; "
-        "omit for single-suite projects. Use get_suites."
-    ),
+    Field(description="Suite ID, e.g. 3 or 'S3'. Required only if the project has several."),
 ]
-CaseId = Annotated[
-    int | str, Field(description="Test case ID, e.g. 1234 or 'C1234'. Use get_cases to find it.")
-]
-RunId = Annotated[
-    int | str,
-    Field(
-        description="Test run ID, e.g. 56 or 'R56'. Use get_runs, or get_plan for runs in plans."
-    ),
-]
+CaseId = Annotated[int | str, Field(description="Case ID, e.g. 1234 or 'C1234'.")]
+RunId = Annotated[int | str, Field(description="Run ID, e.g. 56 or 'R56'.")]
 TestId = Annotated[
     int | str,
-    Field(
-        description="Test ID (an instance of a case inside a run), e.g. 678 or 'T678'. "
-        "Use get_tests(run_id) to find it. Not the same as a case ID."
-    ),
+    Field(description="Test ID (a case inside a run; not a case ID), e.g. 678 or 'T678'."),
 ]
-PlanId = Annotated[
-    int | str, Field(description="Test plan ID, e.g. 9 or 'P9'. Use get_plans to find it.")
-]
-MilestoneId = Annotated[
-    int | str, Field(description="Milestone ID, e.g. 2 or 'M2'. Use get_milestones to find it.")
-]
-Limit = Annotated[
-    int | None,
-    Field(ge=1, le=250, description="Max items to return (1-250). Default: TestRail's page size."),
-]
-Offset = Annotated[int, Field(ge=0, description="Number of items to skip, for paging.")]
+PlanId = Annotated[int | str, Field(description="Plan ID, e.g. 9 or 'P9'.")]
+MilestoneId = Annotated[int | str, Field(description="Milestone ID, e.g. 2 or 'M2'.")]
+Limit = Annotated[int | None, Field(ge=1, le=250, description="Page size (TestRail default: 250).")]
+Offset = Annotated[int, Field(ge=0, description="Items to skip, for paging.")]
 FetchAll = Annotated[
-    bool,
-    Field(
-        description="If true, follow pagination and return all items up to max_items. "
-        "Use sparingly on large projects; prefer filters."
-    ),
+    bool, Field(description="Follow pagination up to max_items. Prefer filters on big projects.")
 ]
-MaxItems = Annotated[
-    int, Field(ge=1, le=5000, description="Safety cap on items when fetch_all is true.")
-]
+MaxItems = Annotated[int, Field(ge=1, le=5000, description="Item cap for fetch_all.")]
 IdList = Annotated[
-    list[int | str] | int | str | None,
-    Field(description="One ID or a list of IDs to filter by."),
+    list[int | str] | int | str | None, Field(description="One ID or a list of IDs.")
 ]
 StatusFilter = Annotated[
     list[int | str] | int | str | None,
-    Field(
-        description="Filter by status: IDs or names, e.g. ['Failed', 'Retest'] or [5, 4]. "
-        "Use get_statuses to see options."
-    ),
+    Field(description="Status IDs or names, e.g. ['Failed', 'Retest'] or 5."),
 ]
 DateFilter = Annotated[
     int | str | None,
-    Field(description="Date as 'YYYY-MM-DD', ISO-8601 datetime, or unix timestamp (UTC)."),
+    Field(description="'YYYY-MM-DD', ISO-8601 datetime or unix timestamp (UTC)."),
 ]
 OptBool = Annotated[bool | None, Field(description="Omit for no filter.")]
 DefectsFilter = Annotated[
-    str | None, Field(description="Only results linked to this defect ID, e.g. 'JIRA-123'.")
+    str | None, Field(description="Only results linked to this defect, e.g. 'JIRA-123'.")
 ]
 IncludeComments = Annotated[
-    bool,
-    Field(description="Include result comments (default true). False gives a compact overview."),
+    bool, Field(description="False leaves comments out: a compact overview.")
 ]
 CommentMaxChars = Annotated[
     int,
     Field(
         ge=100,
         le=50_000,
-        description="Cut each comment after this many characters of cleaned text "
-        "(default 2000); a '[truncated, N chars total]' marker shows the full length.",
+        description="Cut each comment here; a '[truncated, N chars total]' marker is added.",
     ),
 ]
-FullComment = Annotated[
-    bool,
-    Field(description="Return comments in full, ignoring comment_max_chars (default false)."),
-]
-CommentFormatParam = Annotated[
+FullComment = Annotated[bool, Field(description="Return comments uncut.")]
+TextFormatParam = Annotated[
     Literal["markdown", "raw"],
-    Field(
-        description="'markdown' (default): rich-text HTML is converted to readable Markdown "
-        "(styles and tags removed). 'raw': the comment exactly as stored in TestRail."
-    ),
+    Field(description="'markdown': rich-text HTML made readable. 'raw': as stored."),
 ]
+
+AssignedTo = Annotated[
+    list[int | str] | int | str | None,
+    Field(description="Only tests assigned to these users: user IDs, 'me' or 'unassigned'."),
+]
+#: Most entries in an assigned_to filter (keeps the request URL small).
+MAX_ASSIGNEES = 100
 
 #: Most results scanned when looking up one result by id within a test (get_results).
 RESULT_LOOKUP_MAX = 1000
 RESULTS_BUDGET_HINT = (
     "To fit more per call, use include_comments=false or a smaller comment_max_chars."
 )
+
+
+def results_budget_hint(include_comments: bool) -> str:
+    """Advice for a results page cut by the output budget (none if comments are already off)."""
+    return RESULTS_BUDGET_HINT if include_comments else ""
+
 
 FIELD_TYPES = {
     1: "String",
@@ -154,7 +125,7 @@ def to_timestamp(value: int | str | None) -> int | None:
     else:
         text = str(value).strip()
         if len(text) > 64:
-            raise TestRailError(f"Invalid date {value[:20]!r}...: too long.")
+            raise TestRailError(f"Invalid date {text[:20]!r}...: too long.")
         if _TIMESTAMP_RE.fullmatch(text):
             ts = int(text)
         else:
@@ -175,6 +146,8 @@ def to_timestamp(value: int | str | None) -> int | None:
 
 #: Characters reserved for the response envelope (key names, paging block, notes).
 _ENVELOPE_CHARS = 600
+#: Characters reserved for the note added to a single object that had to be cut.
+_NOTE_RESERVE = 200
 
 
 def fit_to_budget(items: list[dict[str, Any]], budget: int) -> int:
@@ -266,17 +239,51 @@ async def list_page(
     if offset:
         params["offset"] = offset
     items, meta = await client.get_page(method, *path_args, key=key, params=params)
-
     if not meta.get("paginated"):
         # TestRail < 6.7 returns bare lists and ignores limit/offset, so the whole list
         # came back; page it client-side.
-        total = len(items)
-        end = offset + limit if limit else total
-        items = items[offset:end]
-        has_more = end < total
-    else:
-        has_more = bool(meta.get("has_more"))
+        return page_locally(
+            reg, items, key=key, shape=shape, limit=limit, offset=offset, budget_hint=budget_hint
+        )
+    return _page_out(
+        reg, items, bool(meta.get("has_more")), key=key, shape=shape, offset=offset,
+        budget_hint=budget_hint,
+    )  # fmt: skip
 
+
+def page_locally(
+    reg: "Registry",
+    items: list[Any],
+    *,
+    key: str,
+    shape: Callable[[dict[str, Any]], dict[str, Any]],
+    limit: int | None,
+    offset: int,
+    budget_hint: str = "",
+    fetch_all_hint: bool = True,
+) -> dict[str, Any]:
+    """Page an already-complete list with offset/limit, within the output budget."""
+    total = len(items)
+    end = offset + limit if limit else total
+    return _page_out(
+        reg, items[offset:end], end < total, key=key, shape=shape, offset=offset,
+        budget_hint=budget_hint, fetch_all_hint=fetch_all_hint,
+    )  # fmt: skip
+
+
+def _page_out(
+    reg: "Registry",
+    items: list[Any],
+    has_more: bool,
+    *,
+    key: str,
+    shape: Callable[[dict[str, Any]], dict[str, Any]],
+    offset: int,
+    budget_hint: str = "",
+    fetch_all_hint: bool = True,
+) -> dict[str, Any]:
+    """Shape one page, cut it to the output budget and describe how to continue."""
+    budget = reg.config.max_output_chars
     shaped = [shape(i) for i in items]
     kept = fit_to_budget(shaped, budget)
     cut_by_budget = kept < len(shaped)
@@ -287,7 +294,12 @@ async def list_page(
     paging: dict[str, Any] = {"offset": offset, "returned": len(shaped), "has_more": has_more}
     if has_more:
         paging["next_offset"] = offset + len(shaped)
-        paging["hint"] = "Call again with offset=next_offset, or use fetch_all=true."
+        # fetch_all is held to the same output budget, so after a size cut only paging helps.
+        paging["hint"] = (
+            "Call again with offset=next_offset, or use fetch_all=true."
+            if fetch_all_hint and not cut_by_budget
+            else "Call again with offset=next_offset."
+        )
     if cut_by_budget:
         paging["note"] = _budget_note(kept, budget, paging["next_offset"], budget_hint)
     return {key: shaped, "paging": paging}
@@ -295,13 +307,54 @@ async def list_page(
 
 def register(reg: "Registry") -> None:
     client = reg.client
+    me: dict[str, int] = {}  # the logged-in user's ID, cached for the session
+
+    async def current_user_id() -> int:
+        if "id" not in me:
+            await get_current_user()
+        if "id" not in me:
+            raise TestRailError("TestRail did not return the current user's ID.")
+        return me["id"]
+
+    async def resolve_assignees(value: list[int | str] | int | str) -> set[int | None]:
+        """User IDs / 'me' / 'unassigned' -> set of assignedto_id values (None = nobody)."""
+        parts = value if isinstance(value, list) else [v for v in str(value).split(",")]
+        parts = [p.strip() if isinstance(p, str) else p for p in parts]
+        parts = [p for p in parts if p != ""]
+        if not parts:
+            raise TestRailError("assigned_to is empty: give user IDs, 'me' or 'unassigned'.")
+        if len(parts) > MAX_ASSIGNEES:
+            raise TestRailError(f"assigned_to accepts at most {MAX_ASSIGNEES} entries.")
+        wanted: set[int | None] = set()
+        for part in parts:
+            word = part.lower() if isinstance(part, str) else None
+            if word == "me":
+                wanted.add(await current_user_id())
+            elif word in ("unassigned", "none"):
+                wanted.add(None)
+            else:
+                wanted.add(parse_id(part, "user"))
+        return wanted
+
+    def single(obj: dict[str, Any], text_format: str) -> dict[str, Any]:
+        """Keep a single-object response within the output budget (see sh.fit_object)."""
+        budget = reg.config.max_output_chars
+        fitted, cut = sh.fit_object(obj, budget - _NOTE_RESERVE)
+        if cut:
+            fitted["note"] = (
+                f"Long text fields were cut to stay within the output size budget ({budget} "
+                "characters)."
+            )
+            if text_format == "raw":
+                fitted["note"] += " text_format='markdown' is usually much shorter."
+        return fitted
 
     # ------------------------------------------------------------------ projects / suites
 
     @reg.read
     async def get_projects(
         is_completed: OptBool = None, limit: Limit = None, offset: Offset = 0
-    ) -> dict:
+    ) -> dict[str, Any]:
         """List TestRail projects. Start here to find a project_id.
 
         is_completed: true = only completed (archived) projects, false = only active ones.
@@ -319,19 +372,19 @@ def register(reg: "Registry") -> None:
         )
 
     @reg.read
-    async def get_project(project_id: ProjectId) -> dict:
+    async def get_project(project_id: ProjectId) -> dict[str, Any]:
         """Get one project's details by ID."""
         return sh.full(await client.get("get_project", parse_id(project_id, "project")))
 
     @reg.read
-    async def get_suites(project_id: ProjectId) -> dict:
+    async def get_suites(project_id: ProjectId) -> dict[str, Any]:
         """List the test suites in a project. Use the suite IDs with get_sections/get_cases."""
         data = await client.get("get_suites", parse_id(project_id, "project"))
         items = data.get("suites", []) if isinstance(data, dict) else data
         return {"suites": [sh.pick(s, sh.SUITE_FIELDS) for s in items or []]}
 
     @reg.read
-    async def get_suite(suite_id: SuiteId) -> dict:
+    async def get_suite(suite_id: SuiteId) -> dict[str, Any]:
         """Get one test suite by ID."""
         return sh.full(await client.get("get_suite", parse_id(suite_id, "suite")))
 
@@ -343,7 +396,7 @@ def register(reg: "Registry") -> None:
         offset: Offset = 0,
         fetch_all: FetchAll = False,
         max_items: MaxItems = 1000,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """List sections (folders) of a suite. parent_id/depth describe the tree.
 
         Use section IDs to filter get_cases. suite_id is required for multi-suite projects.
@@ -391,7 +444,7 @@ def register(reg: "Registry") -> None:
         offset: Offset = 0,
         fetch_all: FetchAll = False,
         max_items: MaxItems = 1000,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """List test cases in a project/suite with optional filters (compact fields only).
 
         Use get_case for a case's full details (steps, expected results, custom fields).
@@ -423,9 +476,15 @@ def register(reg: "Registry") -> None:
         )
 
     @reg.read
-    async def get_case(case_id: CaseId) -> dict:
-        """Get the full details of a test case, including steps and custom fields."""
-        return sh.full(await client.get("get_case", parse_id(case_id, "case")))
+    async def get_case(
+        case_id: CaseId, text_format: TextFormatParam = "markdown"
+    ) -> dict[str, Any]:
+        """Get the full details of a test case, including steps and custom fields.
+
+        Rich-text fields (description, steps, expected, preconditions) are made readable.
+        """
+        case = await client.get("get_case", parse_id(case_id, "case"))
+        return single(sh.detail(case, fmt=text_format), text_format)
 
     # ------------------------------------------------------------------ metadata
 
@@ -450,12 +509,12 @@ def register(reg: "Registry") -> None:
         return out
 
     @reg.read
-    async def get_case_fields() -> dict:
+    async def get_case_fields() -> dict[str, Any]:
         """List the case fields (system and custom) configured on this TestRail instance."""
         return {"case_fields": [_field(f) for f in await client.get("get_case_fields") or []]}
 
     @reg.read
-    async def get_result_fields() -> dict:
+    async def get_result_fields() -> dict[str, Any]:
         """List the custom result fields available when adding results.
 
         Pass them to the add_result* tools in custom_fields, keyed by system_name
@@ -466,7 +525,7 @@ def register(reg: "Registry") -> None:
         return {"result_fields": [_field(f) for f in await client.get("get_result_fields") or []]}
 
     @reg.read
-    async def get_statuses() -> dict:
+    async def get_statuses() -> dict[str, Any]:
         """List result statuses (IDs, names, labels), including custom statuses.
 
         Result tools accept either the ID or the name/label. 'Untested' (is_untested=true)
@@ -481,7 +540,7 @@ def register(reg: "Registry") -> None:
         }
 
     @reg.read
-    async def get_priorities() -> dict:
+    async def get_priorities() -> dict[str, Any]:
         """List case priorities (IDs for the priority_id filter of get_cases)."""
         data = await client.get("get_priorities") or []
         return {
@@ -499,7 +558,7 @@ def register(reg: "Registry") -> None:
         is_started: OptBool = None,
         limit: Limit = None,
         offset: Offset = 0,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """List milestones in a project."""
         return await list_page(
             reg,
@@ -513,7 +572,7 @@ def register(reg: "Registry") -> None:
         )
 
     @reg.read
-    async def get_milestone(milestone_id: MilestoneId) -> dict:
+    async def get_milestone(milestone_id: MilestoneId) -> dict[str, Any]:
         """Get one milestone by ID."""
         return sh.full(await client.get("get_milestone", parse_id(milestone_id, "milestone")))
 
@@ -533,7 +592,7 @@ def register(reg: "Registry") -> None:
         offset: Offset = 0,
         fetch_all: FetchAll = False,
         max_items: MaxItems = 1000,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """List test plans in a project. Use get_plan to see the runs inside a plan."""
         params = {
             "is_completed": is_completed,
@@ -556,7 +615,7 @@ def register(reg: "Registry") -> None:
         )
 
     @reg.read
-    async def get_plan(plan_id: PlanId) -> dict:
+    async def get_plan(plan_id: PlanId) -> dict[str, Any]:
         """Get a test plan with its entries and the runs inside each entry.
 
         Each entry has an id (a GUID, used by add_attachment_to_plan_entry) and runs;
@@ -593,7 +652,7 @@ def register(reg: "Registry") -> None:
         offset: Offset = 0,
         fetch_all: FetchAll = False,
         max_items: MaxItems = 1000,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """List test runs in a project (with pass/fail counts).
 
         Note: runs that are part of a test plan are NOT returned here; use get_plans + get_plan.
@@ -621,7 +680,7 @@ def register(reg: "Registry") -> None:
         )
 
     @reg.read
-    async def get_run(run_id: RunId) -> dict:
+    async def get_run(run_id: RunId) -> dict[str, Any]:
         """Get one test run, including its status counts and whether it is completed (closed)."""
         return sh.full(await client.get("get_run", parse_id(run_id, "run")))
 
@@ -631,38 +690,71 @@ def register(reg: "Registry") -> None:
     async def get_tests(
         run_id: RunId,
         status: StatusFilter = None,
+        assigned_to: AssignedTo = None,
         limit: Limit = None,
         offset: Offset = 0,
         fetch_all: FetchAll = False,
         max_items: MaxItems = 1000,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """List the tests in a run (each test = one case in that run) with current status.
 
         Use the returned test IDs with add_result/get_results, or the case_id with
-        add_result_for_case. Filter by status, e.g. status=['Untested', 'Retest'].
+        add_result_for_case. Filter by status, e.g. status=['Untested', 'Retest'], and by
+        assignee, e.g. assigned_to='me'.
         """
+        rid = parse_id(run_id, "run")
+        # Check the filters before listing anything (a bad assignee fails fast).
+        wanted: set[int | None] = set()  # never empty once resolved
+        if assigned_to is not None and assigned_to != []:
+            wanted = await resolve_assignees(assigned_to)
         statuses = await client.get_statuses() if status else []
         labels = await reg.status_labels()
-        return await list_page(
-            reg,
+        params: dict[str, Any] = {"status_id": resolve_status_filter(status, statuses)}
+
+        def shape(t: dict[str, Any]) -> dict[str, Any]:
+            return sh.with_status(sh.pick(t, sh.TEST_FIELDS), labels)
+
+        if not wanted:
+            return await list_page(
+                reg, "get_tests", rid, key="tests", shape=shape, params=params, limit=limit,
+                offset=offset, fetch_all=fetch_all, max_items=max_items,
+            )  # fmt: skip
+
+        if None not in wanted:
+            # Undocumented in TestRail's API reference but honored by current versions; it
+            # saves fetching everyone's tests. Older versions may ignore it, so every test
+            # is still checked below and paging is done here, on the filtered list.
+            params["assignedto_id"] = sorted(i for i in wanted if i is not None)
+        items, truncated = await client.get_all(
             "get_tests",
-            parse_id(run_id, "run"),
+            rid,
             key="tests",
-            shape=lambda t: sh.with_status(sh.pick(t, sh.TEST_FIELDS), labels),
-            params={"status_id": resolve_status_filter(status, statuses)},
-            limit=limit,
-            offset=offset,
-            fetch_all=fetch_all,
+            params={k: v for k, v in params.items() if v is not None},
             max_items=max_items,
         )
+        mine = [t for t in items if isinstance(t, dict) and t.get("assignedto_id") in wanted]
+        out = page_locally(
+            reg, mine, key="tests", shape=shape, limit=limit, offset=offset,
+            fetch_all_hint=False,
+        )  # fmt: skip
+        if truncated:
+            out["note"] = (
+                f"Stopped after {max_items} tests from TestRail; there may be more matching "
+                "tests. Raise max_items (up to 5000) or add a status filter."
+            )
+        return out
 
     @reg.read
-    async def get_test(test_id: TestId) -> dict:
-        """Get one test (a case inside a run) with its current status and case details."""
+    async def get_test(
+        test_id: TestId, text_format: TextFormatParam = "markdown"
+    ) -> dict[str, Any]:
+        """Get one test (a case inside a run) with its current status and case details.
+
+        Rich-text fields are made readable, as in get_case.
+        """
         labels = await reg.status_labels()
-        return sh.with_status(
-            sh.full(await client.get("get_test", parse_id(test_id, "test"))), labels
-        )
+        test = await client.get("get_test", parse_id(test_id, "test"))
+        return single(sh.with_status(sh.detail(test, fmt=text_format), labels), text_format)
 
     # ------------------------------------------------------------------ results
 
@@ -676,21 +768,19 @@ def register(reg: "Registry") -> None:
         include_comments: IncludeComments = True,
         comment_max_chars: CommentMaxChars = sh.DEFAULT_COMMENT_CHARS,
         full_comment: FullComment = False,
-        comment_format: CommentFormatParam = "markdown",
+        comment_format: TextFormatParam = "markdown",
         result_id: Annotated[
             int | str | None,
             Field(
-                description="Return only this result (from get_results_for_run or an add_result* "
-                "tool). TestRail has no single-result API, so it is looked up in this test's "
-                "results. Combine with full_comment=true to read one comment in full."
+                description="Return only this result (looked up in this test's results). "
+                "With full_comment=true, reads one comment in full."
             ),
         ] = None,
-    ) -> dict:
-        """List results (newest first) for a test in a run. Use get_tests to find test IDs.
+    ) -> dict[str, Any]:
+        """List results (newest first) for a test in a run.
 
-        Comments are converted from rich-text HTML to readable Markdown and cut at
-        comment_max_chars (default 2000) with a '[truncated, N chars total]' marker; use
-        full_comment=true for the whole text. Set include_comments=false for a quick overview.
+        Comments are rich-text HTML made readable and cut at comment_max_chars (default
+        2000); full_comment=true returns them whole, include_comments=false leaves them out.
         """
         tid = parse_id(test_id, "test")
         statuses = await client.get_statuses() if status else []
@@ -746,7 +836,7 @@ def register(reg: "Registry") -> None:
             params=params,
             limit=limit,
             offset=offset,
-            budget_hint=RESULTS_BUDGET_HINT,
+            budget_hint=results_budget_hint(include_comments),
         )
 
     @reg.read
@@ -760,13 +850,10 @@ def register(reg: "Registry") -> None:
         include_comments: IncludeComments = True,
         comment_max_chars: CommentMaxChars = sh.DEFAULT_COMMENT_CHARS,
         full_comment: FullComment = False,
-        comment_format: CommentFormatParam = "markdown",
-    ) -> dict:
-        """List results (newest first) for a case within a specific run.
-
-        Comments are converted to readable Markdown and cut at comment_max_chars; see
-        get_results for the comment options.
-        """
+        comment_format: TextFormatParam = "markdown",
+    ) -> dict[str, Any]:
+        """List results (newest first) for a case within a run. Comment options as in
+        get_results."""
         statuses = await client.get_statuses() if status else []
         labels = await reg.status_labels()
         return await list_page(
@@ -788,7 +875,7 @@ def register(reg: "Registry") -> None:
             },
             limit=limit,
             offset=offset,
-            budget_hint=RESULTS_BUDGET_HINT,
+            budget_hint=results_budget_hint(include_comments),
         )
 
     @reg.read
@@ -806,14 +893,13 @@ def register(reg: "Registry") -> None:
         include_comments: IncludeComments = True,
         comment_max_chars: CommentMaxChars = sh.DEFAULT_COMMENT_CHARS,
         full_comment: FullComment = False,
-        comment_format: CommentFormatParam = "markdown",
-    ) -> dict:
-        """List all results added in a run (newest first).
+        comment_format: TextFormatParam = "markdown",
+    ) -> dict[str, Any]:
+        """List all results added in a run (newest first). Comments as in get_results.
 
-        Comments are converted to readable Markdown and cut at comment_max_chars. Large
-        responses are cut to fit the output size budget; continue with paging.next_offset.
-        For an overview of a big run, use include_comments=false. To read one comment in
-        full, use get_results(test_id, result_id=..., full_comment=true).
+        Large responses are cut to the output size budget; continue with paging.next_offset.
+        For a big run use include_comments=false; read one comment in full with
+        get_results(test_id, result_id=..., full_comment=true).
         """
         statuses = await client.get_statuses() if status else []
         labels = await reg.status_labels()
@@ -841,7 +927,7 @@ def register(reg: "Registry") -> None:
             offset=offset,
             fetch_all=fetch_all,
             max_items=max_items,
-            budget_hint=RESULTS_BUDGET_HINT,
+            budget_hint=results_budget_hint(include_comments),
         )
 
     # ------------------------------------------------------------------ attachments
@@ -849,7 +935,7 @@ def register(reg: "Registry") -> None:
     @reg.read
     async def get_attachments_for_case(
         case_id: CaseId, limit: Limit = None, offset: Offset = 0
-    ) -> dict:
+    ) -> dict[str, Any]:
         """List attachments on a test case (metadata only, not file contents)."""
         return await list_page(
             reg,
@@ -862,7 +948,7 @@ def register(reg: "Registry") -> None:
         )
 
     @reg.read
-    async def get_attachments_for_test(test_id: TestId) -> dict:
+    async def get_attachments_for_test(test_id: TestId) -> dict[str, Any]:
         """List attachments on a test's results (metadata only). Use get_tests to find test IDs."""
         return await list_page(
             reg,
@@ -875,7 +961,7 @@ def register(reg: "Registry") -> None:
     @reg.read
     async def get_attachments_for_run(
         run_id: RunId, limit: Limit = None, offset: Offset = 0
-    ) -> dict:
+    ) -> dict[str, Any]:
         """List attachments on a test run (metadata only)."""
         return await list_page(
             reg,
@@ -890,7 +976,7 @@ def register(reg: "Registry") -> None:
     @reg.read
     async def get_attachments_for_plan(
         plan_id: PlanId, limit: Limit = None, offset: Offset = 0
-    ) -> dict:
+    ) -> dict[str, Any]:
         """List attachments on a test plan (metadata only)."""
         return await list_page(
             reg,
@@ -915,12 +1001,12 @@ def register(reg: "Registry") -> None:
         fetch_all: Annotated[
             bool,
             Field(
-                description="If true, follow pagination and return all users up to max_items. "
-                "Default false (one page); prefer get_user_by_email for a single person."
+                description="Follow pagination up to max_items. For one person, use "
+                "get_user_by_email."
             ),
         ] = False,
         max_items: MaxItems = 1000,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """List users (id, name, email). Use a user's id as assigned_to_id in result tools.
 
         To find one person, get_user_by_email is cheaper.
@@ -943,7 +1029,7 @@ def register(reg: "Registry") -> None:
         email: Annotated[
             str, Field(max_length=MAX_EMAIL_CHARS, description="The user's email address.")
         ],
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Look up a single user by email address (to get the ID for assigned_to_id)."""
         cleaned = email.strip()
         if len(cleaned) > MAX_EMAIL_CHARS or not _EMAIL_RE.fullmatch(cleaned):
@@ -953,7 +1039,15 @@ def register(reg: "Registry") -> None:
         )
 
     @reg.read
-    async def get_configs(project_id: ProjectId) -> dict:
+    async def get_current_user() -> dict[str, Any]:
+        """The TestRail user this server is logged in as ('me' in get_tests assigned_to)."""
+        user = await client.get("get_current_user")
+        if isinstance(user, dict) and isinstance(user.get("id"), int):
+            me["id"] = user["id"]
+        return sh.pick(user, (*sh.USER_FIELDS, "is_admin"))
+
+    @reg.read
+    async def get_configs(project_id: ProjectId) -> dict[str, Any]:
         """List configuration groups and options (e.g. Browsers: Chrome, Firefox) of a project.
 
         Runs inside test plans can be per-configuration; get_plan shows each run's config.

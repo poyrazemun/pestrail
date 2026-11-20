@@ -6,6 +6,7 @@ from collections.abc import Callable, Iterable, Mapping
 from datetime import UTC, datetime
 from typing import Any, Literal
 
+from .serialize import to_json_text
 from .text import html_to_markdown, looks_like_html
 
 PROJECT_FIELDS = ("id", "name", "suite_mode", "is_completed", "url")
@@ -163,6 +164,89 @@ def clean_text(value: Any) -> Any:
     return value
 
 
+def clean_custom(value: Any) -> Any:
+    """clean_text for a custom field, including lists of step dicts.
+
+    Separated steps (``custom_steps_separated``, ``custom_step_results``) are lists of
+    ``{content, expected, additional_info, ...}`` whose texts are rich text as well.
+    """
+    if isinstance(value, list):
+        return [
+            {k: clean_text(v) for k, v in item.items()} if isinstance(item, dict) else item
+            for item in value
+        ]
+    return clean_text(value)
+
+
+def detail(obj: Mapping[str, Any], *, fmt: CommentFormat = "markdown") -> dict[str, Any]:
+    """A single case/test: all fields, rich-text custom fields readable, empty fields left out."""
+    out = full(obj)
+    if fmt == "markdown":
+        out = {k: clean_custom(v) if k.startswith("custom_") else v for k, v in out.items()}
+    return {k: v for k, v in out.items() if not _is_empty(v)}
+
+
+#: Text fields are never cut below this many characters by fit_object.
+MIN_FIELD_CHARS = 200
+
+
+def _cap_text(value: Any, cap: int) -> Any:
+    if isinstance(value, str) and len(value) > cap:
+        return value[:cap] + f"... [truncated, {len(value)} chars total]"
+    return value
+
+
+def _cap_strings(obj: Mapping[str, Any], cap: int) -> dict[str, Any]:
+    """Cut every string longer than ``cap``: top-level fields and fields of list items."""
+    out: dict[str, Any] = {}
+    for key, value in obj.items():
+        if isinstance(value, list):
+            out[key] = [
+                {k: _cap_text(v, cap) for k, v in item.items()} if isinstance(item, dict) else item
+                for item in value
+            ]
+        else:
+            out[key] = _cap_text(value, cap)
+    return out
+
+
+def _longest_string(obj: Mapping[str, Any]) -> int:
+    lengths = [len(v) for v in obj.values() if isinstance(v, str)]
+    for value in obj.values():
+        if isinstance(value, list):
+            lengths += [
+                len(v)
+                for item in value
+                if isinstance(item, dict)
+                for v in item.values()
+                if isinstance(v, str)
+            ]
+    return max(lengths, default=0)
+
+
+def fit_object(obj: dict[str, Any], budget: int) -> tuple[dict[str, Any], bool]:
+    """Keep one object within ``budget`` characters of output by cutting its longest texts.
+
+    Finds the largest per-field length that fits (every longer text is cut to it, with a
+    '[truncated, N chars total]' marker), so short fields stay whole. Returns the object
+    and whether anything was cut. Never cuts below MIN_FIELD_CHARS; if the object still
+    doesn't fit (e.g. it is large because of structure, not text), it is returned as is.
+    """
+    if len(to_json_text(obj)) <= budget:
+        return obj, False
+    low, high = MIN_FIELD_CHARS, _longest_string(obj)
+    best: dict[str, Any] | None = None
+    while low <= high:  # binary search: at most ~20 serializations
+        cap = (low + high) // 2
+        candidate = _cap_strings(obj, cap)
+        if len(to_json_text(candidate)) <= budget:
+            best, low = candidate, cap + 1
+        else:
+            high = cap - 1
+    result = best if best is not None else _cap_strings(obj, MIN_FIELD_CHARS)
+    return result, result != obj
+
+
 def shape_comment(
     value: Any,
     *,
@@ -182,6 +266,10 @@ def shape_comment(
     if full or len(text) <= max_chars:
         return text
     return text[:max_chars] + f"... [truncated, {len(text)} chars total]"
+
+
+def _is_empty(value: Any) -> bool:
+    return value is None or (isinstance(value, (str, list, dict)) and not value)
 
 
 def result_shape(
@@ -205,8 +293,10 @@ def result_shape(
         if comment_format == "markdown":
             for key, value in out.items():
                 if key.startswith("custom_"):
-                    out[key] = clean_text(value)
-        return out
+                    out[key] = clean_custom(value)
+        # Empty fields (null elapsed/defects/version, no attachments, ...) are left out: they
+        # cost ~1/3 of a result's size and say nothing. A missing field means "empty".
+        return {k: v for k, v in out.items() if not _is_empty(v)}
 
     return shape
 

@@ -126,7 +126,7 @@ def test_build_url_formats_lists_and_bools_and_skips_none(client):
 
 def test_build_url_rejects_non_int_path_args(client):
     with pytest.raises(TestRailError):
-        client.build_url("get_case", ("1/../delete_case",))  # type: ignore[arg-type]
+        client.build_url("get_case", ("1/../delete_case",))
     with pytest.raises(TestRailError):
         client.build_url("get_case", (-1,))
     with pytest.raises(TestRailError):

@@ -93,7 +93,7 @@ class StdioServer:
             except queue.Empty:
                 pytest.fail(f"No response to {method} within {TIMEOUT}s. stderr:\n{self.stderr()}")
             # Every stdout line must be a JSON-RPC message; anything else corrupts the stream.
-            message = json.loads(line)
+            message: dict[str, Any] = json.loads(line)
             assert message.get("jsonrpc") == "2.0", line
             if message.get("id") == msg_id:
                 return message
@@ -138,7 +138,7 @@ def test_stdio_lists_all_tools():
         assert init["serverInfo"]["name"] == "pestrail"
         tools = server.request("tools/list")["result"]["tools"]
         names = {t["name"] for t in tools}
-        assert len(names) == 38
+        assert len(names) == 39
         assert {"get_projects", "add_results_for_cases", "add_result_with_attachments"} <= names
         assert not any(n.startswith(("delete", "close", "update")) for n in names)
 
@@ -156,7 +156,7 @@ def test_stdio_read_only_mode_hides_write_tools():
     try:
         tools = server.request("tools/list")["result"]["tools"]
         names = {t["name"] for t in tools}
-        assert len(names) == 29
+        assert len(names) == 30
         assert not any(n.startswith("add_") for n in names)
     finally:
         server.close()
@@ -173,7 +173,7 @@ def test_per_user_env_file_is_loaded(tmp_path):
     server, _ = _session({}, config_home=str(config_home))
     try:
         names = {t["name"] for t in server.request("tools/list")["result"]["tools"]}
-        assert len(names) == 29  # read-only came from the per-user file
+        assert len(names) == 30  # read-only came from the per-user file
     finally:
         server.close()
 
@@ -198,7 +198,7 @@ def test_explicit_env_file_is_loaded(tmp_path):
     server, _ = _session({"PESTRAIL_ENV_FILE": str(env_file)})
     try:
         names = {t["name"] for t in server.request("tools/list")["result"]["tools"]}
-        assert len(names) == 29
+        assert len(names) == 30
     finally:
         server.close()
 

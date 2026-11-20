@@ -76,14 +76,14 @@ def statuses(mock_api):
 def test_all_tools_registered_in_write_mode(mock_api):
     names = tool_names(build())
     assert names >= WRITE_TOOLS
-    assert len(names) == 38
+    assert len(names) == 39
 
 
 def test_read_only_mode_registers_no_write_tools(mock_api):
     names = tool_names(build(read_only=True))
     assert not (names & WRITE_TOOLS)
     assert all(n.startswith("get_") for n in names)
-    assert len(names) == 29
+    assert len(names) == 30
 
 
 def test_no_destructive_tool_names(mock_api):
@@ -124,8 +124,11 @@ def test_lifespan_closes_http_client(mock_api):
     client = TestRailClient(config, sleep=_no_sleep)
     server = create_server(config, client)
 
+    lifespan = server.settings.lifespan
+    assert lifespan is not None
+
     async def session() -> None:
-        async with server.settings.lifespan(server):
+        async with lifespan(server):
             assert not client._http.is_closed
 
     asyncio.run(session())

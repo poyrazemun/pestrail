@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 import respx
+from mcp.types import CallToolResult, TextContent
 
 from pestrail.client import TestRailClient
 from pestrail.config import Config, Secret
@@ -15,6 +16,15 @@ from pestrail.config import Config, Secret
 FAKE_URL = "https://testrail.invalid"
 API = f"{FAKE_URL}/index.php?/api/v2/"
 FAKE_KEY = "fake-api-key-DO-NOT-LEAK-123"
+
+
+def text_of(result: object) -> str:
+    """The text of a successful tool call (narrows the SDK's result and content unions)."""
+    assert isinstance(result, CallToolResult), result
+    assert not result.is_error, result
+    content = result.content[0]
+    assert isinstance(content, TextContent), content
+    return content.text
 
 
 def make_config(

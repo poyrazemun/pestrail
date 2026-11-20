@@ -61,6 +61,7 @@ READ_METHODS: frozenset[str] = frozenset(
         "get_attachments_for_plan",
         "get_users",
         "get_user_by_email",
+        "get_current_user",
         "get_configs",
     }
 )

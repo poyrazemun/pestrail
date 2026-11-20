@@ -1,0 +1,113 @@
+name: Release
+
+# Pushing a vX.Y.Z tag builds, tests and publishes that exact commit to PyPI with Trusted
+# Publishing (OpenID Connect: no API token is stored anywhere), then drafts a GitHub
+# Release from the CHANGELOG entry for review. See the release runbook.
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+
+# Nothing by default; each job asks only for what it needs.
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+# Actions are pinned to full commit SHAs (a moved tag can't change what runs);
+# Dependabot (github-actions) proposes updates and keeps the version comments current.
+jobs:
+  build:
+    name: Check, test and build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # full history, to check the tag is on main
+          persist-credentials: false
+      - name: Tag matches __version__ and CHANGELOG
+        id: check
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="$(python3 .github/scripts/release_check.py check "$TAG")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Tagged commit is on main
+        run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          python-version: "3.14"
+          enable-cache: false # release builds never reuse a cache
+      - name: Install (locked)
+        run: uv sync --locked
+      - name: Lint, format check, type check, tests
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+          uv run mypy
+          uv run pytest
+      - name: Build
+        run: uv build --out-dir dist
+      - name: dist holds exactly this version's sdist and wheel
+        env:
+          VERSION: ${{ steps.check.outputs.version }}
+        run: |
+          ls -l dist
+          expected="$(printf '%s\n' "pestrail-$VERSION.tar.gz" "pestrail-$VERSION-py3-none-any.whl" | LC_ALL=C sort)"
+          actual="$(ls dist | LC_ALL=C sort)"
+          if [ "$actual" != "$expected" ]; then
+            echo "Unexpected dist contents:"; echo "$actual"; exit 1
+          fi
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    # The "pypi" environment is the one PyPI trusts; give it required reviewers so every
+    # upload waits for an explicit approval.
+    environment:
+      name: pypi
+      url: https://pypi.org/project/pestrail/${{ needs.build.outputs.version }}/
+    permissions:
+      id-token: write # short-lived OIDC token for PyPI; nothing else
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: dist/
+      # Uploads with Trusted Publishing and adds signed attestations (provenance).
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+
+  draft-release:
+    name: Draft GitHub Release
+    needs: [build, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the draft release
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: dist/
+      - name: Create draft release with CHANGELOG notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          python3 .github/scripts/release_check.py notes "$VERSION" > "$RUNNER_TEMP/notes.md"
+          gh release create "$TAG" dist/* --draft --verify-tag \
+            --title "pestrail $VERSION" --notes-file "$RUNNER_TEMP/notes.md"

@@ -13,7 +13,7 @@ from pestrail.client import TestRailClient, TestRailError
 from pestrail.scope import enforce_write_scope
 from pestrail.server import create_server
 
-from .conftest import API, _no_sleep, make_config
+from .conftest import API, _no_sleep, make_config, text_of
 
 
 def run(coro):
@@ -165,7 +165,7 @@ def test_tool_attach_to_result_created_in_session(mock_api, statuses, tmp_path):
     result = asyncio.run(
         server.call_tool("add_attachment_to_result", {"result_id": 999, "file_path": str(f)})
     )
-    assert not result.is_error
+    text_of(result)  # succeeded
     assert upload.call_count == 1
 
 
@@ -212,6 +212,5 @@ def test_tool_allows_write_inside_allowed_run(mock_api, statuses):
             {"run_id": "R56", "case_id": "C1234", "status": "Failed"},
         )
     )
-    assert not result.is_error
-    payload: dict[str, Any] = __import__("json").loads(result.content[0].text)
+    payload: dict[str, Any] = __import__("json").loads(text_of(result))
     assert payload["id"] == 999

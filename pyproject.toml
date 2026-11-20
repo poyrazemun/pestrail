@@ -38,6 +38,7 @@ Issues = "https://github.com/poyrazemun/pestrail/issues"
 
 [dependency-groups]
 dev = [
+    "mypy>=2.4",
     "pytest>=8",
     "respx>=0.21",
     "ruff>=0.6",
@@ -64,6 +65,28 @@ include = ["src/pestrail", "tests", "README.md", "LICENSE", ".env.example", "pyp
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+
+[tool.mypy]
+# `uv run mypy` checks all of these. The package is strict; tests are type-checked
+# (including untyped test functions) without requiring annotations everywhere.
+python_version = "3.11"
+files = ["src/pestrail", "tests", ".github/scripts"]
+mypy_path = "src"
+strict = true
+warn_unreachable = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+disallow_untyped_calls = false
+check_untyped_defs = true
+
+[[tool.mypy.overrides]]
+# Only used by one test, and it ships no type information.
+module = ["jsonschema", "jsonschema.*"]
+ignore_missing_imports = true
 
 [tool.ruff]
 line-length = 100

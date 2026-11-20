@@ -15,8 +15,9 @@ attachments. See [docs/safety.md](https://github.com/poyrazemun/pestrail/blob/ma
 
 ## Tools
 
-- **Read (29):** projects, suites, sections, cases, case/result fields, statuses, priorities,
-  configs, milestones, plans, runs, tests, results, attachment lists, users.
+- **Read (30):** projects, suites, sections, cases, case/result fields, statuses, priorities,
+  configs, milestones, plans, runs, tests (e.g. only the ones assigned to you), results,
+  attachment lists, users, the current user.
 - **Write (9, hidden in read-only mode):** `add_result`, `add_result_for_case`,
   `add_results_for_cases` (report a whole test session in one call),
   `add_result_with_attachments`, and `add_attachment_to_result` / `_run` / `_case` /

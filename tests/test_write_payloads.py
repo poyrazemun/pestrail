@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
 import httpx
 import pytest
@@ -25,7 +26,7 @@ STATUSES = [{"id": 1, "name": "passed", "label": "Passed", "is_untested": False}
 
 
 def _body(**overrides):
-    base = {
+    base: dict[str, Any] = {
         "status": 1,
         "comment": None,
         "elapsed": None,

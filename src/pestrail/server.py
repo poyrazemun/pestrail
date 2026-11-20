@@ -4,15 +4,17 @@ import functools
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, TypeVar
 
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import TextContent, ToolAnnotations
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from . import __version__
 from .client import TestRailClient, TestRailError
 from .config import Config
+from .schema import slim_schema
 from .serialize import to_json_text
 
 logger = logging.getLogger(__name__)
@@ -25,7 +27,9 @@ run) -> get_results / add_result. Runs that belong to a test plan are only liste
 not by get_runs.
 
 IDs may be given as numbers or TestRail-style prefixed IDs: C123 (case), R45 (run), T678 (test),
-P9 (plan/project), S3 (suite), M2 (milestone).
+P9 (plan/project), S3 (suite), M2 (milestone). Find them with the list tools (get_projects,
+get_suites, get_sections, get_cases, get_runs, get_plans, get_tests, get_milestones,
+get_user_by_email). A test ID (T) is a case inside a run, not a case ID (C).
 
 Statuses: call get_statuses to see valid statuses on this instance (they can be customized).
 Result tools accept a status ID or name ("Passed", "failed", "Blocked", "Retest"...). "Untested"
@@ -46,6 +50,51 @@ WRITE_ANNOTATIONS = ToolAnnotations(
 )
 
 ToolFn = Callable[..., Awaitable[Any]]
+ArgModelT = TypeVar("ArgModelT", bound=BaseModel)
+
+
+def _unknown_arguments_message(tool: str, unknown: list[str], allowed: set[str]) -> str:
+    """Name the bad arguments and the valid ones, so the model's retry is the right call."""
+    parts = []
+    for name in unknown:
+        # TestRail's API says status_id / assignedto_id where the tools say status / ...
+        guess = name.removesuffix("_id")
+        hint = f" (did you mean '{guess}'?)" if guess != name and guess in allowed else ""
+        parts.append(f"'{name}'{hint}")
+    return (
+        f"Unknown parameter {', '.join(parts)} for {tool}; nothing was sent to TestRail. "
+        f"Valid parameters: {', '.join(sorted(allowed))}."
+    )
+
+
+def _forbid_extra(model: type[ArgModelT], tool: str) -> type[ArgModelT]:
+    """Subclass of a tool's argument model that rejects arguments it does not define.
+
+    The MCP SDK silently drops unknown arguments, so get_tests(status_id=...) used to
+    return every test, and add_result(status_id=5) would add a result without a status.
+    """
+    allowed = {field.alias or name for name, field in model.model_fields.items()}
+
+    # (cls, value) is pydantic's "before" model-validator signature; pydantic makes it a
+    # classmethod itself because the first parameter is named cls.
+    def reject_unknown(cls: Any, value: Any) -> Any:
+        if isinstance(value, dict):
+            unknown = sorted(str(key) for key in value if key not in allowed)
+            if unknown:
+                raise ValueError(_unknown_arguments_message(tool, unknown, allowed))
+        return value
+
+    # Same name as the original, so validation errors still name the tool.
+    strict: type[ArgModelT] = type(
+        model.__name__,
+        (model,),
+        {
+            "model_config": ConfigDict(extra="forbid"),
+            "__module__": model.__module__,
+            "_reject_unknown": model_validator(mode="before")(reject_unknown),
+        },
+    )
+    return strict
 
 
 class Registry:
@@ -69,7 +118,19 @@ class Registry:
             # would pretty-print (indent=2); we emit compact JSON, one list item per line.
             return TextContent(type="text", text=to_json_text(result))
 
-        self.mcp.tool(annotations=annotations)(wrapper)
+        # structured_output=False: tools return ready-made compact JSON text (above), so the
+        # SDK must not derive an output schema from the return type (it would add one to
+        # every tool definition and validate results against it).
+        self.mcp.tool(annotations=annotations, structured_output=False)(wrapper)
+        tool = self.mcp._tool_manager.get_tool(fn.__name__)
+        if tool is None:  # pragma: no cover - SDK internals changed; caught by tests
+            raise RuntimeError(f"tool {fn.__name__!r} was not registered")
+        # Unknown arguments are an error, not silently dropped (see _forbid_extra).
+        strict = _forbid_extra(tool.fn_metadata.arg_model, fn.__name__)
+        tool.fn_metadata.arg_model = strict
+        # Advertise a smaller, equivalent schema: it is sent with every conversation.
+        # Arguments are still validated with the pydantic model.
+        tool.parameters = slim_schema(strict.model_json_schema(by_alias=True))
         self.tool_names.append(fn.__name__)
         return wrapper
 
