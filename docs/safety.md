@@ -12,6 +12,7 @@ misconfiguration doesn't cause damage.
 | **Attachment roots** | Write mode refuses to start without `TESTRAIL_ATTACHMENT_ROOTS`, so files can only come from folders you chose. |
 | **Write allowlists** | Optional `TESTRAIL_ALLOWED_PROJECT_IDS` / `TESTRAIL_ALLOWED_RUN_IDS` confine writes. |
 | **Input limits** | Sizes are capped (see [Limits](#limits)). Bulk calls validate every entry before sending anything. |
+| **Dry run** | Every write tool takes `dry_run=true`: all checks above run (including the allowlist lookups), and the exact request is returned instead of sent. |
 | **Secrets** | The API key is never logged, returned or put in URLs, and is redacted from error messages. |
 | **Safe configuration** | No implicit `.env` from the working directory, plain `http://` refused, OS trust store for TLS. |
 

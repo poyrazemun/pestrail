@@ -21,7 +21,8 @@ attachments. See [docs/safety.md](https://github.com/poyrazemun/pestrail/blob/ma
 - **Write (9, hidden in read-only mode):** `add_result`, `add_result_for_case`,
   `add_results_for_cases` (report a whole test session in one call),
   `add_result_with_attachments`, and `add_attachment_to_result` / `_run` / `_case` /
-  `_plan` / `_plan_entry`.
+  `_plan` / `_plan_entry`. Each takes `dry_run=true` to preview the exact request without
+  sending it.
 
 IDs can be plain numbers or TestRail-style (`C1234`, `R56`, `T678`), and statuses can be
 given by name (`"Failed"`, custom statuses too). Result comments written in the rich-text

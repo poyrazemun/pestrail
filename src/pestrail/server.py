@@ -40,6 +40,8 @@ and cannot close runs or plans. Results are always added (never overwritten); Te
 the full history. Writes may also be limited to TESTRAIL_ALLOWED_PROJECT_IDS /
 TESTRAIL_ALLOWED_RUN_IDS when configured. Before adding results, confirm the run/case IDs with
 the user if there is any doubt, because added results cannot be removed through this server.
+Every write tool accepts dry_run=true: it runs all checks and returns the exact request
+without sending anything, e.g. to show the user what would be added.
 """
 
 READ_ANNOTATIONS = ToolAnnotations(
