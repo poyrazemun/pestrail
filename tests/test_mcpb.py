@@ -77,6 +77,31 @@ def test_no_folder_arguments():
     assert "TESTRAIL_ATTACHMENT_ROOTS" not in env
 
 
+@pytest.mark.parametrize(
+    ("read_only", "roots", "problem"),
+    [
+        ("false", [], True),  # seen live: Read-only off, no folder added
+        ("off", [], True),
+        ("false", ["/logs"], False),
+        ("true", [], False),
+        (None, [], False),  # missing = read-only
+    ],
+)
+def test_write_mode_without_folders_is_explained_in_form_terms(read_only, roots, problem):
+    env = {} if read_only is None else {"TESTRAIL_READ_ONLY": read_only}
+    launcher.prepare_environment(["--attachment-roots", *roots], env)
+    message = launcher.setup_problem(env)
+    assert (message is not None) == problem
+    if message:
+        assert "Attachment folder" in message and "Read-only" in message
+        assert "TESTRAIL_" not in message  # no environment-variable jargon
+
+
+def test_any_path_escape_hatch_is_respected():
+    env = {"TESTRAIL_READ_ONLY": "false", "TESTRAIL_ALLOW_ANY_ATTACHMENT_PATH": "true"}
+    assert launcher.setup_problem(env) is None
+
+
 # ----------------------------------------------------------------- manifest
 
 
