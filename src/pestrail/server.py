@@ -1,6 +1,7 @@
 """MCP server app: builds an MCPServer and registers TestRail tools."""
 
 import functools
+import inspect
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -133,6 +134,9 @@ class Registry:
         # Advertise a smaller, equivalent schema: it is sent with every conversation.
         # Arguments are still validated with the pydantic model.
         tool.parameters = slim_schema(strict.model_json_schema(by_alias=True))
+        # Docstrings keep their source indentation before Python 3.13; normalize them so
+        # every Python version advertises the same, smaller description.
+        tool.description = inspect.cleandoc(tool.description or "")
         self.tool_names.append(fn.__name__)
         return wrapper
 
