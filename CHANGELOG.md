@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.4.0 (2026-11-24)
+
+Preview writes before they happen, and install pestrail in Claude Desktop with one click.
+
+### Added
+
+- Claude Desktop extension: `pestrail-X.Y.Z.mcpb` is attached to every GitHub Release. Open
+  it with Claude Desktop and fill in the form (TestRail URL, username, API key stored
+  securely, read-only on by default, attachment folders); it installs the matching
+  pestrail release from PyPI.
+- `dry_run` on every write tool: all checks run (IDs, write allowlists, statuses, size
+  limits, attachment rules) and the exact request is returned instead of sent, e.g. to
+  show the user what would be added.
+
+### Fixed
+
+- Tool descriptions no longer carry docstring indentation on Python 3.11 and 3.12
+  (about 480 fewer characters per conversation there).
+- Extension: with read-only off but no attachment folder, the log now says how to fix it
+  in the settings form (pestrail still refuses to start in that state).
+
+### Internal
+
+- The release workflow builds the extension and attaches it to the GitHub Release; the
+  release check refuses a version mismatch between the package and the extension.
+- Test fixtures use neutral example text.
+
 ## 0.3.0 (2026-11-20)
 
 Smaller, stricter and easier to ask: "my tests" in one call, readable test cases, about 28%

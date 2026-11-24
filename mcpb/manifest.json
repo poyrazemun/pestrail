@@ -2,7 +2,7 @@
   "manifest_version": "0.4",
   "name": "pestrail",
   "display_name": "pestrail (TestRail)",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Safety-first TestRail access: browse projects, cases, runs and plans, add results and attachments. It cannot delete anything.",
   "long_description": "pestrail lets Claude do day-to-day QA work in TestRail: find runs and tests (including the ones assigned to you), read cases and results as readable text, and add results with attachments. It cannot delete anything, cannot create, edit or move cases, suites or sections, and cannot close runs or plans. Read-only mode (on by default) hides every write tool. Uploads are limited to the attachment folders you choose. Installs the matching pestrail release from PyPI. Community project, not affiliated with or endorsed by TestRail, Gurock Software or Idera, Inc.",
   "author": {
