@@ -7,6 +7,7 @@ per-conversation token cost. These tests keep it small and prove the slimming is
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 from typing import Any
 
@@ -21,11 +22,11 @@ from pestrail.server import create_server
 
 from .conftest import API, make_config
 
-#: Ceilings for the full tools/list payload in compact JSON. Measured 2026-11-19: 35,489 /
-#: 24,986 (39 / 30 tools, after adding get_current_user and assigned_to); before slimming
+#: Ceilings for the full tools/list payload in compact JSON. Measured 2026-11-24: 36,576 /
+#: 24,958 on Python 3.11 and 3.14 alike (39 / 30 tools, incl. dry_run); before slimming
 #: 48,238 / 32,520 (38 / 29 tools). Raise deliberately, not by habit: every character here
 #: is paid in every conversation.
-MAX_WRITE_MODE_CHARS = 36_000
+MAX_WRITE_MODE_CHARS = 37_000
 MAX_READ_ONLY_CHARS = 25_500
 
 #: Values tried against every parameter; both schemas must accept/reject each the same way.
@@ -203,3 +204,12 @@ def test_tools_advertise_no_output_schema():
     # definition would grow and results would be validated against them.
     for tool in asyncio.run(_server(read_only=False).list_tools()):
         assert tool.output_schema is None, tool.name
+
+
+def test_descriptions_are_normalized_on_every_python_version():
+    # Before Python 3.13, docstrings keep their source indentation; CI on 3.11 measured
+    # ~480 extra characters of spaces. Descriptions must look the same everywhere.
+    for tool in asyncio.run(_server(read_only=False).list_tools()):
+        text = tool.description or ""
+        assert text == inspect.cleandoc(text), tool.name
+        assert "\n    " not in text, tool.name

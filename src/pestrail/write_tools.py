@@ -80,6 +80,13 @@ FilePath = Annotated[
         "are resolved against those roots."
     ),
 ]
+DryRun = Annotated[
+    bool,
+    Field(description="Run every check and return the exact request, but send nothing."),
+]
+
+#: Added to every dry-run response.
+DRY_RUN_NOTE = "Dry run: nothing was sent to TestRail. Call again without dry_run to do it."
 
 
 class CaseResult(BaseModel):
@@ -228,6 +235,40 @@ def register(reg: Registry) -> None:
             "size_bytes": size_bytes,
         }
 
+    # ------------------------------------------------------------------ dry run
+    # A dry run makes every check a real call makes (IDs, write allowlists and their read
+    # lookups, statuses, payload limits, attachment rules, and the client's own method/ID
+    # validation via build_url), then describes the request instead of calling post/upload.
+
+    def _request(method: str, *ids: int | str, body: Any = None) -> dict[str, Any]:
+        client.build_url(method, ids)  # same allowlist and ID checks as a real request
+        out: dict[str, Any] = {
+            "http": "POST",
+            "endpoint": "/".join([method, *(str(i) for i in ids)]),
+        }
+        if body is not None:
+            out["body"] = body
+        return out
+
+    async def _file_info(path: str) -> dict[str, Any]:
+        resolved = await _check_file(path)
+        try:
+            size_bytes = await asyncio.to_thread(lambda: resolved.stat().st_size)
+        except OSError as exc:
+            raise TestRailError(f"Cannot read file {path}: {type(exc).__name__}") from exc
+        return {"file": resolved.name, "path": str(resolved), "size_bytes": size_bytes}
+
+    def _dry_run(*requests: dict[str, Any], **extra: Any) -> dict[str, Any]:
+        return {"dry_run": True, "requests": list(requests), **extra, "note": DRY_RUN_NOTE}
+
+    async def _upload_or_preview(
+        method: str, *ids: int | str, file_path: str, dry_run: bool
+    ) -> dict[str, Any]:
+        if dry_run:
+            info = await _file_info(file_path)
+            return _dry_run({**_request(method, *ids), "file": info})
+        return await _upload(method, *ids, file_path=file_path)
+
     # ------------------------------------------------------------------ results
 
     @reg.write
@@ -240,6 +281,7 @@ def register(reg: Registry) -> None:
         version: Version = None,
         assigned_to_id: AssignedTo = None,
         custom_fields: CustomFields = None,
+        dry_run: DryRun = False,
     ) -> dict[str, Any]:
         """Add a new result to a test (a case inside a run), identified by test ID.
 
@@ -258,6 +300,8 @@ def register(reg: Registry) -> None:
             custom_fields=custom_fields,
             statuses=await _statuses_if(status),
         )
+        if dry_run:
+            return _dry_run(_request("add_result", tid, body=body))
         result = await client.post("add_result", tid, body=body)
         _remember(result, run)
         return _result_summary(result or {}, await reg.status_labels())
@@ -273,6 +317,7 @@ def register(reg: Registry) -> None:
         version: Version = None,
         assigned_to_id: AssignedTo = None,
         custom_fields: CustomFields = None,
+        dry_run: DryRun = False,
     ) -> dict[str, Any]:
         """Add a new result for a case in a run, e.g. "mark C1234 in R56 as Failed".
 
@@ -291,6 +336,8 @@ def register(reg: Registry) -> None:
             custom_fields=custom_fields,
             statuses=await _statuses_if(status),
         )
+        if dry_run:
+            return _dry_run(_request("add_result_for_case", rid, cid, body=body))
         result = await client.post("add_result_for_case", rid, cid, body=body)
         _remember(result, rid)
         out = _result_summary(result or {}, await reg.status_labels())
@@ -308,6 +355,7 @@ def register(reg: Registry) -> None:
                 description="One entry per case.",
             ),
         ],
+        dry_run: DryRun = False,
     ) -> dict[str, Any]:
         """Add results for many cases in one run in one request: the main tool for
         reporting a test session.
@@ -338,6 +386,11 @@ def register(reg: Registry) -> None:
                 errors.append(f"results[{index}] (case {entry.case_id}): {exc}")
         if errors:
             raise TestRailError("Nothing was sent. Fix these entries:\n" + "\n".join(errors))
+        if dry_run:
+            return _dry_run(
+                _request("add_results_for_cases", rid, body={"results": payload}),
+                count=len(payload),
+            )
 
         created = await client.post("add_results_for_cases", rid, body={"results": payload})
         # From here on TestRail has accepted the request: the results exist. Any error must
@@ -382,35 +435,50 @@ def register(reg: Registry) -> None:
                 "allowlists, for a result not added in this session (it is verified)."
             ),
         ] = None,
+        dry_run: DryRun = False,
     ) -> dict[str, Any]:
         """Upload a local file (log, screenshot, report) and attach it to an existing result.
 
         Result IDs come from the add_result* tools or get_results / get_results_for_run.
         """
         await _scope(result_id=result_id, test_id=parse_optional_id(test_id, "test"))
-        return await _upload("add_attachment_to_result", result_id, file_path=file_path)
+        return await _upload_or_preview(
+            "add_attachment_to_result", result_id, file_path=file_path, dry_run=dry_run
+        )
 
     @reg.write
-    async def add_attachment_to_run(run_id: RunId, file_path: FilePath) -> dict[str, Any]:
+    async def add_attachment_to_run(
+        run_id: RunId, file_path: FilePath, dry_run: DryRun = False
+    ) -> dict[str, Any]:
         """Upload a local file and attach it to a test run (e.g. a full test report)."""
         rid = parse_id(run_id, "run")
         await _scope(run_id=rid)
-        return await _upload("add_attachment_to_run", rid, file_path=file_path)
+        return await _upload_or_preview(
+            "add_attachment_to_run", rid, file_path=file_path, dry_run=dry_run
+        )
 
     @reg.write
-    async def add_attachment_to_case(case_id: CaseId, file_path: FilePath) -> dict[str, Any]:
+    async def add_attachment_to_case(
+        case_id: CaseId, file_path: FilePath, dry_run: DryRun = False
+    ) -> dict[str, Any]:
         """Upload a local file and attach it to a test case. This does not change the case's
         fields; it only adds an attachment."""
         cid = parse_id(case_id, "case")
         await _scope(case_id=cid)
-        return await _upload("add_attachment_to_case", cid, file_path=file_path)
+        return await _upload_or_preview(
+            "add_attachment_to_case", cid, file_path=file_path, dry_run=dry_run
+        )
 
     @reg.write
-    async def add_attachment_to_plan(plan_id: PlanId, file_path: FilePath) -> dict[str, Any]:
+    async def add_attachment_to_plan(
+        plan_id: PlanId, file_path: FilePath, dry_run: DryRun = False
+    ) -> dict[str, Any]:
         """Upload a local file and attach it to a test plan."""
         pid = parse_id(plan_id, "plan")
         await _scope(plan_id=pid)
-        return await _upload("add_attachment_to_plan", pid, file_path=file_path)
+        return await _upload_or_preview(
+            "add_attachment_to_plan", pid, file_path=file_path, dry_run=dry_run
+        )
 
     @reg.write
     async def add_attachment_to_plan_entry(
@@ -420,15 +488,17 @@ def register(reg: Registry) -> None:
             Field(description="Plan entry ID (a GUID like '3933d74b-...'); see get_plan entries."),
         ],
         file_path: FilePath,
+        dry_run: DryRun = False,
     ) -> dict[str, Any]:
         """Upload a local file and attach it to an entry (group of runs) in a test plan."""
         pid = parse_id(plan_id, "plan")
         await _scope(plan_id=pid)
-        return await _upload(
+        return await _upload_or_preview(
             "add_attachment_to_plan_entry",
             pid,
             entry_id.strip(),
             file_path=file_path,
+            dry_run=dry_run,
         )
 
     # ------------------------------------------------------------------ convenience
@@ -452,6 +522,7 @@ def register(reg: Registry) -> None:
         version: Version = None,
         assigned_to_id: AssignedTo = None,
         custom_fields: CustomFields = None,
+        dry_run: DryRun = False,
     ) -> dict[str, Any]:
         """Add a result for a case in a run, then upload files to it.
 
@@ -473,13 +544,25 @@ def register(reg: Registry) -> None:
         )
 
         problems = []
+        files = []
         for path in file_paths:
             try:
-                await _check_file(path)
+                if dry_run:
+                    files.append(await _file_info(path))
+                else:
+                    await _check_file(path)  # unchanged real-call check
             except TestRailError as exc:
                 problems.append(str(exc))
         if problems:
             raise TestRailError("No result was added. File problems:\n" + "\n".join(problems))
+        if dry_run:
+            # The uploads go to the new result, whose ID only exists after the first request.
+            client.build_url("add_attachment_to_result", (0,))  # method allowlist check
+            uploads = [
+                {"http": "POST", "endpoint": "add_attachment_to_result/<new result id>", "file": f}
+                for f in files
+            ]
+            return _dry_run(_request("add_result_for_case", rid, cid, body=body), *uploads)
 
         result = await client.post("add_result_for_case", rid, cid, body=body) or {}
         result_id = result.get("id")

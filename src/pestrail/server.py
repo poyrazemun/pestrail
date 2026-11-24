@@ -1,6 +1,7 @@
 """MCP server app: builds an MCPServer and registers TestRail tools."""
 
 import functools
+import inspect
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -40,6 +41,8 @@ and cannot close runs or plans. Results are always added (never overwritten); Te
 the full history. Writes may also be limited to TESTRAIL_ALLOWED_PROJECT_IDS /
 TESTRAIL_ALLOWED_RUN_IDS when configured. Before adding results, confirm the run/case IDs with
 the user if there is any doubt, because added results cannot be removed through this server.
+Every write tool accepts dry_run=true: it runs all checks and returns the exact request
+without sending anything, e.g. to show the user what would be added.
 """
 
 READ_ANNOTATIONS = ToolAnnotations(
@@ -131,6 +134,9 @@ class Registry:
         # Advertise a smaller, equivalent schema: it is sent with every conversation.
         # Arguments are still validated with the pydantic model.
         tool.parameters = slim_schema(strict.model_json_schema(by_alias=True))
+        # Docstrings keep their source indentation before Python 3.13; normalize them so
+        # every Python version advertises the same, smaller description.
+        tool.description = inspect.cleandoc(tool.description or "")
         self.tool_names.append(fn.__name__)
         return wrapper
 
