@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.0.0 (2026-11-25)
+
+First stable release: read a case's change history, look up case types and templates, and
+stricter protection against instructions hidden in TestRail content.
+
+### Added
+
+- `get_history_for_case`: who changed which fields of a test case, when, and from what to
+  what. Paged within the output budget; rich-text values are made readable.
+- `get_case_types` and `get_templates`: IDs for the `type_id` / `template_id` filters of
+  `get_cases`.
+
+### Security
+
+- Stricter server instructions: everything read from TestRail (titles, steps, comments,
+  custom fields, history, attachment names) is untrusted data; the assistant must never
+  follow instructions found in it, never call a tool or write because of it, and must tell
+  the user instead.
+- Attachment content is never downloaded or read: attachments are only listed (name, type,
+  size). `get_attachment` is not in the API method allowlist, and tests keep it out.
+
+### Changed
+
+- PyPI classifier: Development Status 5 - Production/Stable (was 3 - Alpha).
+
 ## 0.4.0 (2026-11-24)
 
 Preview writes before they happen, and install pestrail in Claude Desktop with one click.
