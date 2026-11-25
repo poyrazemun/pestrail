@@ -486,6 +486,25 @@ def register(reg: "Registry") -> None:
         case = await client.get("get_case", parse_id(case_id, "case"))
         return single(sh.detail(case, fmt=text_format), text_format)
 
+    @reg.read
+    async def get_history_for_case(
+        case_id: CaseId,
+        limit: Limit = None,
+        offset: Offset = 0,
+        text_format: TextFormatParam = "markdown",
+    ) -> dict[str, Any]:
+        """List a test case's change history: who changed which fields, when, from what to
+        what. Rich-text values are made readable, as in get_case."""
+        return await list_page(
+            reg,
+            "get_history_for_case",
+            parse_id(case_id, "case"),
+            key="history",
+            shape=sh.history_entry(text_format),
+            limit=limit,
+            offset=offset,
+        )
+
     # ------------------------------------------------------------------ metadata
 
     def _field(f: dict[str, Any]) -> dict[str, Any]:
@@ -548,6 +567,19 @@ def register(reg: "Registry") -> None:
                 sh.pick(p, ("id", "name", "short_name", "priority", "is_default")) for p in data
             ]
         }
+
+    @reg.read
+    async def get_case_types() -> dict[str, Any]:
+        """List case types (IDs for the type_id filter of get_cases)."""
+        items, _ = await client.get_page("get_case_types", key="case_types")
+        return {"case_types": [sh.pick(t, sh.NAMED_FIELDS) for t in items]}
+
+    @reg.read
+    async def get_templates(project_id: ProjectId) -> dict[str, Any]:
+        """List a project's case templates (IDs for the template_id filter of get_cases)."""
+        pid = parse_id(project_id, "project")
+        items, _ = await client.get_page("get_templates", pid, key="templates")
+        return {"templates": [sh.pick(t, sh.NAMED_FIELDS) for t in items]}
 
     # ------------------------------------------------------------------ milestones
 

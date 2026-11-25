@@ -97,6 +97,11 @@ MILESTONE_FIELDS = (
     "url",
 )
 USER_FIELDS = ("id", "name", "email", "is_active", "role_id", "role")
+#: Case types and templates: what a filter needs (drops e.g. i18n_custom_id).
+NAMED_FIELDS = ("id", "name", "is_default")
+HISTORY_FIELDS = ("id", "type_id", "created_on", "user_id")
+#: A history change without its "options" block (field settings, not the change).
+CHANGE_FIELDS = ("field", "label", "old_value", "new_value", "old_text", "new_text")
 ATTACHMENT_FIELDS = (
     "id",
     "name",
@@ -176,6 +181,27 @@ def clean_custom(value: Any) -> Any:
             for item in value
         ]
     return clean_text(value)
+
+
+def history_entry(fmt: CommentFormat = "markdown") -> Callable[[Mapping[str, Any]], dict[str, Any]]:
+    """Shape one get_history_for_case entry: who changed what, when; values made readable."""
+
+    def shape(entry: Mapping[str, Any]) -> dict[str, Any]:
+        out = pick(entry, HISTORY_FIELDS)
+        changes = []
+        for change in entry.get("changes") or []:
+            if not isinstance(change, Mapping):
+                continue
+            picked = pick(change, CHANGE_FIELDS)
+            if fmt == "markdown":
+                picked = {k: clean_text(v) for k, v in picked.items()}
+            changes.append({k: v for k, v in picked.items() if not _is_empty(v)})
+        out["changes"] = changes
+        comments = entry.get("comments")
+        out["comments"] = clean_custom(comments) if fmt == "markdown" else comments
+        return {k: v for k, v in out.items() if not _is_empty(v)}
+
+    return shape
 
 
 def detail(obj: Mapping[str, Any], *, fmt: CommentFormat = "markdown") -> dict[str, Any]:

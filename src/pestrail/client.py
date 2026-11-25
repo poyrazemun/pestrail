@@ -63,6 +63,9 @@ READ_METHODS: frozenset[str] = frozenset(
         "get_user_by_email",
         "get_current_user",
         "get_configs",
+        "get_case_types",
+        "get_templates",
+        "get_history_for_case",
     }
 )
 
