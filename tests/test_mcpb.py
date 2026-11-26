@@ -102,6 +102,50 @@ def test_any_path_escape_hatch_is_respected():
     assert launcher.setup_problem(env) is None
 
 
+@pytest.mark.parametrize(
+    ("name", "value", "field"),
+    [
+        ("TESTRAIL_ALLOWED_PROJECT_IDS", "3, abc", "Allowed projects"),
+        ("TESTRAIL_ALLOWED_PROJECT_IDS", "R56", "Allowed projects"),  # a run, not a project
+        ("TESTRAIL_ALLOWED_RUN_IDS", "C12", "Allowed runs"),  # a case, not a run
+        ("TESTRAIL_ALLOWED_RUN_IDS", "0", "Allowed runs"),
+        ("PESTRAIL_TOOLSETS", "attachments, everything", "Tool groups"),
+    ],
+)
+def test_invalid_text_settings_are_explained_in_form_terms(name, value, field):
+    env = {"TESTRAIL_READ_ONLY": "true", name: value}
+    launcher.prepare_environment([], env)
+    message = launcher.setup_problem(env)
+    assert message is not None
+    assert message.startswith(f"pestrail extension: {field}")
+    assert "Settings > Extensions > pestrail" in message
+    assert "TESTRAIL_" not in message and "PESTRAIL_" not in message
+
+
+def test_valid_text_settings_start_normally():
+    env = {
+        "TESTRAIL_READ_ONLY": "false",
+        "TESTRAIL_ALLOWED_PROJECT_IDS": "3, P7",
+        "TESTRAIL_ALLOWED_RUN_IDS": "R56,78",
+        "PESTRAIL_TOOLSETS": "core, history",
+        "PESTRAIL_LOG_LEVEL": "${user_config.unused}",
+    }
+    launcher.prepare_environment(["--attachment-roots", "/logs"], env)
+    assert launcher.setup_problem(env) is None
+    assert env["TESTRAIL_ALLOWED_PROJECT_IDS"] == "3, P7"  # passed on unchanged
+
+
+def test_empty_text_settings_are_not_checked():
+    env = {
+        "TESTRAIL_ALLOWED_PROJECT_IDS": "${user_config.allowed_project_ids}",
+        "TESTRAIL_ALLOWED_RUN_IDS": "",
+        "PESTRAIL_TOOLSETS": "${user_config.toolsets}",
+    }
+    launcher.prepare_environment([], env)
+    assert env == {"TESTRAIL_READ_ONLY": "true"}
+    assert launcher.setup_problem(env) is None
+
+
 # ----------------------------------------------------------------- manifest
 
 
@@ -136,6 +180,23 @@ def test_settings_form_is_safe_by_default():
     assert "TESTRAIL_ATTACHMENT_ROOTS" not in MANIFEST["server"]["mcp_config"]["env"]
     # Only the form counts: a personal .env file must not add settings the form hides.
     assert MANIFEST["server"]["mcp_config"]["env"]["PESTRAIL_ENV_FILE"] == "none"
+
+
+@pytest.mark.parametrize(
+    ("setting", "variable", "title"),
+    [
+        ("allowed_project_ids", "TESTRAIL_ALLOWED_PROJECT_IDS", launcher.PROJECTS),
+        ("allowed_run_ids", "TESTRAIL_ALLOWED_RUN_IDS", launcher.RUNS),
+        ("toolsets", "PESTRAIL_TOOLSETS", launcher.TOOL_GROUPS),
+    ],
+)
+def test_optional_text_settings(setting, variable, title):
+    field = MANIFEST["user_config"][setting]
+    assert field["type"] == "string" and field["required"] is False and "default" not in field
+    # The launcher's messages use the title the user sees in the form.
+    assert field["title"] == title
+    env = MANIFEST["server"]["mcp_config"]["env"]
+    assert env[variable] == f"${{user_config.{setting}}}"
 
 
 def test_manifest_has_only_known_top_level_fields():

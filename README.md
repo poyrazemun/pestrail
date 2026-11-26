@@ -15,8 +15,9 @@ attachments. See [docs/safety.md](https://github.com/poyrazemun/pestrail/blob/ma
 
 ## Tools
 
-- **Read (33):** projects, suites, sections, cases (with their change history), case/result
-  fields, case types, templates, statuses, priorities, configs, milestones, plans, runs,
+- **Read (34):** projects, suites, sections, cases (with their change history), case/result
+  fields, case types, templates, statuses, priorities, configs, milestones, plans, runs
+  (and a one-call run summary: counts per status and assignee, failed and blocked tests),
   tests (e.g. only the ones assigned to you), results, attachment lists (name, type, size;
   the content is never downloaded), users, the current user.
 - **Write (9, hidden in read-only mode):** `add_result`, `add_result_for_case`,
@@ -43,7 +44,9 @@ paged to fit your MCP client's limits.
 [latest release](https://github.com/poyrazemun/pestrail/releases/latest) and open it with
 Claude Desktop. Fill in the form: TestRail URL, username, API key (stored securely),
 **Read-only** (on by default) and, for writes, the **Attachment folders** uploads may come
-from. It installs the matching pestrail release from PyPI.
+from. Optional: **Allowed projects** / **Allowed runs** limit where Claude can write, and
+**Tool groups** hides tools you don't use. It installs the matching pestrail release from
+PyPI.
 
 **Claude Desktop, by hand:** open **Settings > Desktop app > Extensions > Manage > Edit Config**, add the block below, then
 quit Claude Desktop completely and start it again.
@@ -93,6 +96,7 @@ mode won't start without it. Optionally limit writes with `TESTRAIL_ALLOWED_PROJ
 | `TESTRAIL_READ_ONLY` | `true` registers only the read tools. |
 | `TESTRAIL_ATTACHMENT_ROOTS` | Folders attachments may be uploaded from. Required in write mode. |
 | `TESTRAIL_ALLOWED_PROJECT_IDS` / `TESTRAIL_ALLOWED_RUN_IDS` | Optional: confine writes to these projects/runs. |
+| `PESTRAIL_TOOLSETS` | Optional: offer only some tool groups, e.g. `core` or `attachments,history`. Fewer tools = cheaper conversations. |
 
 The full reference covers timeouts, `.env` files, proxies and corporate TLS:
 [docs/configuration.md](https://github.com/poyrazemun/pestrail/blob/main/docs/configuration.md).
@@ -100,6 +104,7 @@ The full reference covers timeouts, `.env` files, proxies and corporate TLS:
 ## Example prompts
 
 - *"In run R56, which tests are assigned to me? My TestRail email is me@your-company.com."*
+- *"How is run R56 doing? Who has failures?"*
 - *"Show me all Failed or Retest tests in run R56 with their latest comment."*
 - *"Report my session to run R56: C101 passed, C102 failed (defect UI-55), C103 blocked."*
 - *"Add a Failed result to C1234 in R56 and attach `C:\artifacts\login.log`."*

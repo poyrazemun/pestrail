@@ -1,6 +1,7 @@
-"""Read-only MCP tools. These are always registered."""
+"""Read-only MCP tools, registered in both modes (unless their tool group is turned off)."""
 
 import re
+from collections import Counter
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Annotated, Any, Literal
@@ -88,6 +89,29 @@ RESULT_LOOKUP_MAX = 1000
 RESULTS_BUDGET_HINT = (
     "To fit more per call, use include_comments=false or a smaller comment_max_chars."
 )
+
+
+#: get_run_summary: tests read per call (default and most) and what it shows.
+SUMMARY_DEFAULT_TESTS = 5000
+SUMMARY_MAX_TESTS = 20_000
+#: Statuses listed by default, by their system names (labels can be renamed per instance)...
+SUMMARY_DEFAULT_LIST = ("failed", "blocked")
+#: ...and the IDs of TestRail's built-in Failed and Blocked, if statuses cannot be loaded.
+SUMMARY_DEFAULT_IDS = (5, 2)
+SUMMARY_RUN_FIELDS = (
+    "id", "name", "project_id", "plan_id", "milestone_id", "config", "is_completed", "url",
+)  # fmt: skip
+SUMMARY_TEST_FIELDS = ("id", "case_id", "title", "status_id", "assignedto_id")
+#: Status counters on a run object (built-in statuses plus up to 7 custom ones).
+_RUN_COUNT_FIELDS = (
+    "passed_count", "blocked_count", "untested_count", "retest_count", "failed_count",
+    *(f"custom_status{i}_count" for i in range(1, 8)),
+)  # fmt: skip
+
+
+def run_test_count(run: dict[str, Any]) -> int:
+    """Number of tests in a run according to its status counters (0 if unknown)."""
+    return sum(v for k in _RUN_COUNT_FIELDS if isinstance(v := run.get(k), int))
 
 
 def results_budget_hint(include_comments: bool) -> str:
@@ -261,13 +285,17 @@ def page_locally(
     offset: int,
     budget_hint: str = "",
     fetch_all_hint: bool = True,
+    reserve: int = 0,
 ) -> dict[str, Any]:
-    """Page an already-complete list with offset/limit, within the output budget."""
+    """Page an already-complete list with offset/limit, within the output budget.
+
+    ``reserve``: characters the caller adds to the response next to the list.
+    """
     total = len(items)
     end = offset + limit if limit else total
     return _page_out(
         reg, items[offset:end], end < total, key=key, shape=shape, offset=offset,
-        budget_hint=budget_hint, fetch_all_hint=fetch_all_hint,
+        budget_hint=budget_hint, fetch_all_hint=fetch_all_hint, reserve=reserve,
     )  # fmt: skip
 
 
@@ -281,11 +309,12 @@ def _page_out(
     offset: int,
     budget_hint: str = "",
     fetch_all_hint: bool = True,
+    reserve: int = 0,
 ) -> dict[str, Any]:
     """Shape one page, cut it to the output budget and describe how to continue."""
     budget = reg.config.max_output_chars
     shaped = [shape(i) for i in items]
-    kept = fit_to_budget(shaped, budget)
+    kept = fit_to_budget(shaped, budget - reserve)
     cut_by_budget = kept < len(shaped)
     if cut_by_budget:
         shaped = shaped[:kept]
@@ -775,6 +804,84 @@ def register(reg: "Registry") -> None:
                 "tests. Raise max_items (up to 5000) or add a status filter."
             )
         return out
+
+    @reg.read
+    async def get_run_summary(
+        run_id: RunId,
+        list_status: Annotated[
+            StatusFilter, Field(description="Statuses to list tests for. Default: Failed, Blocked.")
+        ] = None,
+        offset: Annotated[int, Field(ge=0, description="Listed tests to skip, for paging.")] = 0,
+        max_items: Annotated[
+            int, Field(ge=1, le=SUMMARY_MAX_TESTS, description="Most tests read from TestRail.")
+        ] = SUMMARY_DEFAULT_TESTS,
+    ) -> dict[str, Any]:
+        """Run overview in one call: test counts per status and per assignee (user IDs; null =
+        unassigned), plus the tests needing attention (default: Failed, Blocked).
+
+        Use it for "how is this run doing / who has failures" instead of paging get_tests.
+        """
+        rid = parse_id(run_id, "run")
+        if list_status is not None and list_status != "" and list_status != []:
+            listed = set(resolve_status_filter(list_status, await client.get_statuses()) or [])
+        else:
+            listed = await default_attention_statuses()
+        labels = await reg.status_labels()
+        run = await client.get("get_run", rid)
+        items, truncated = await client.get_all("get_tests", rid, key="tests", max_items=max_items)
+        tests = [t for t in items if isinstance(t, dict)]
+
+        def label(status_id: Any) -> str:
+            return labels.get(status_id) or f"status {status_id}"
+
+        by_status = Counter(t.get("status_id") for t in tests)
+        per_person: dict[Any, Counter[str]] = {}
+        for t in tests:
+            per_person.setdefault(t.get("assignedto_id"), Counter())[label(t.get("status_id"))] += 1
+        summary: dict[str, Any] = {
+            "run": sh.pick(run, SUMMARY_RUN_FIELDS),
+            "total_tests": len(tests),
+            "by_status": [
+                {"status_id": sid, "status": label(sid), "count": n}
+                for sid, n in by_status.most_common()
+            ],
+            "by_assignee": [
+                {"assignedto_id": who, "count": sum(counts.values()), "statuses": dict(counts)}
+                for who, counts in sorted(per_person.items(), key=lambda kv: -sum(kv[1].values()))
+            ],
+            "listed_statuses": [label(s) for s in sorted(listed)],
+        }
+        if truncated:
+            in_run = run_test_count(run)
+            summary["note"] = (
+                f"Only the first {len(tests)} tests were read"
+                + (f" of {in_run} in this run" if in_run else "")
+                + f"; all counts cover those tests. Raise max_items (up to {SUMMARY_MAX_TESTS}) "
+                "for the whole run."
+            )
+        attention = [t for t in tests if t.get("status_id") in listed]
+
+        def shape(t: dict[str, Any]) -> dict[str, Any]:
+            return sh.with_status(sh.pick(t, SUMMARY_TEST_FIELDS), labels)
+
+        page = page_locally(
+            reg, attention, key="tests", shape=shape, limit=None, offset=offset,
+            fetch_all_hint=False, reserve=len(compact(summary)),
+        )  # fmt: skip
+        return {**summary, **page}
+
+    async def default_attention_statuses() -> set[int]:
+        """Failed and Blocked, found by their system names (labels can be renamed)."""
+        try:
+            statuses = await client.get_statuses()
+        except TestRailError:
+            statuses = []
+        found = {
+            int(s["id"])
+            for s in statuses
+            if "id" in s and str(s.get("name", "")).lower() in SUMMARY_DEFAULT_LIST
+        }
+        return found or set(SUMMARY_DEFAULT_IDS)
 
     @reg.read
     async def get_test(
