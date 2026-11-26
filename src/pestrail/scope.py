@@ -138,9 +138,10 @@ async def enforce_write_scope(
     if allowed_runs:
         if resolved_run is None:
             raise TestRailError(
-                "TESTRAIL_ALLOWED_RUN_IDS is set, but this write is not tied to a test run. "
-                "Use a run/result/test-scoped tool, or also set TESTRAIL_ALLOWED_PROJECT_IDS "
-                "for case/plan uploads."
+                "TESTRAIL_ALLOWED_RUN_IDS is set, but this write is not tied to a test run "
+                "(case and plan attachments never are), so it is refused. Use a "
+                "run/result/test-scoped tool. To allow case/plan attachments, limit writes "
+                "with TESTRAIL_ALLOWED_PROJECT_IDS only."
             )
         if resolved_run not in allowed_runs:
             allowed = ", ".join(str(i) for i in sorted(allowed_runs))

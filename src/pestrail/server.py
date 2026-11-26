@@ -17,6 +17,7 @@ from .client import TestRailClient, TestRailError
 from .config import Config
 from .schema import slim_schema
 from .serialize import to_json_text
+from .toolsets import TOOLSETS, group_of
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +121,8 @@ class Registry:
         self.client = client
         self.config = config
         self.tool_names: list[str] = []
+        #: Tools left out because their group is not in config.toolsets.
+        self.hidden_tools: list[str] = []
 
     def _register(self, fn: ToolFn, annotations: ToolAnnotations) -> ToolFn:
         @functools.wraps(fn)
@@ -132,6 +135,12 @@ class Registry:
             # A ready-made content block is passed through by the SDK unchanged. The SDK
             # would pretty-print (indent=2); we emit compact JSON, one list item per line.
             return TextContent(type="text", text=to_json_text(result))
+
+        group = group_of(fn.__name__)
+        if group is not None and group not in self.config.toolsets:
+            # Not advertised to the model; the function still works for internal callers.
+            self.hidden_tools.append(fn.__name__)
+            return wrapper
 
         # structured_output=False: tools return ready-made compact JSON text (above), so the
         # SDK must not derive an output schema from the return type (it would add one to
@@ -169,6 +178,19 @@ class Registry:
         return {int(s["id"]): str(s.get("label") or s.get("name")) for s in statuses if "id" in s}
 
 
+def _hidden_note(config: Config) -> str:
+    """Tell the model which tool groups the user turned off, so it can say so if needed."""
+    hidden = [name for name in TOOLSETS if name not in config.toolsets]
+    if not hidden:
+        return ""
+    return (
+        f"\nThe user turned off these tool groups to save space: {', '.join(hidden)}. Tools "
+        "mentioned above from these groups are not available. If a task needs one, tell the "
+        "user it can be turned back on with PESTRAIL_TOOLSETS (in the Claude Desktop "
+        'extension: the "Tool groups" setting).'
+    )
+
+
 def create_server(config: Config, client: TestRailClient | None = None) -> MCPServer:
     """Build the MCP server. Write tools are only registered when not in read-only mode."""
     from . import read_tools, write_tools  # local import avoids cycles
@@ -187,7 +209,9 @@ def create_server(config: Config, client: TestRailClient | None = None) -> MCPSe
     mcp = MCPServer(
         name="pestrail",
         title="pestrail (TestRail)",
-        instructions=INSTRUCTIONS + f"\nThis server is running in {mode} mode.",
+        instructions=INSTRUCTIONS
+        + f"\nThis server is running in {mode} mode."
+        + _hidden_note(config),
         version=__version__,
         log_level="WARNING",
         lifespan=lifespan,
@@ -196,5 +220,11 @@ def create_server(config: Config, client: TestRailClient | None = None) -> MCPSe
     read_tools.register(registry)
     if not config.read_only:
         write_tools.register(registry)
-    logger.info("pestrail %s ready (%s, %d tools)", __version__, mode, len(registry.tool_names))
+    logger.info(
+        "pestrail %s ready (%s, %d tools, %d hidden by PESTRAIL_TOOLSETS)",
+        __version__,
+        mode,
+        len(registry.tool_names),
+        len(registry.hidden_tools),
+    )
     return mcp

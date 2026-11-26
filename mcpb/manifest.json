@@ -4,7 +4,7 @@
   "display_name": "pestrail (TestRail)",
   "version": "1.0.0",
   "description": "Safety-first TestRail access: browse projects, cases, runs and plans, add results and attachments. It cannot delete anything.",
-  "long_description": "pestrail lets Claude do day-to-day QA work in TestRail: find runs and tests (including the ones assigned to you), read cases and results as readable text, and add results with attachments. It cannot delete anything, cannot create, edit or move cases, suites or sections, and cannot close runs or plans. Read-only mode (on by default) hides every write tool. Uploads are limited to the attachment folders you choose. Installs the matching pestrail release from PyPI. Community project, not affiliated with or endorsed by TestRail, Gurock Software or Idera, Inc.",
+  "long_description": "pestrail lets Claude do day-to-day QA work in TestRail: find runs and tests (including the ones assigned to you), read cases and results as readable text, and add results with attachments. It cannot delete anything, cannot create, edit or move cases, suites or sections, and cannot close runs or plans. Read-only mode (on by default) hides every write tool. Uploads are limited to the attachment folders you choose, and writes can be limited to chosen projects or runs. Installs the matching pestrail release from PyPI. Community project, not affiliated with or endorsed by TestRail, Gurock Software or Idera, Inc.",
   "author": {
     "name": "pestrail contributors",
     "url": "https://github.com/poyrazemun/pestrail"
@@ -36,6 +36,9 @@
         "TESTRAIL_USERNAME": "${user_config.testrail_username}",
         "TESTRAIL_API_KEY": "${user_config.testrail_api_key}",
         "TESTRAIL_READ_ONLY": "${user_config.read_only}",
+        "TESTRAIL_ALLOWED_PROJECT_IDS": "${user_config.allowed_project_ids}",
+        "TESTRAIL_ALLOWED_RUN_IDS": "${user_config.allowed_run_ids}",
+        "PESTRAIL_TOOLSETS": "${user_config.toolsets}",
         "PESTRAIL_ENV_FILE": "none"
       }
     }
@@ -78,6 +81,24 @@
       "title": "Attachment folders",
       "description": "Folders Claude may upload files from (logs, screenshots, reports). Required when read-only is off; nothing outside them can be uploaded.",
       "multiple": true,
+      "required": false
+    },
+    "allowed_project_ids": {
+      "type": "string",
+      "title": "Allowed projects",
+      "description": "Optional, when read-only is off: Claude may only add results and attachments in these projects. Project IDs, comma-separated, e.g. 3, P7. Empty: any project your API key can write to.",
+      "required": false
+    },
+    "allowed_run_ids": {
+      "type": "string",
+      "title": "Allowed runs",
+      "description": "Optional, when read-only is off: Claude may only add results and attachments in these runs, e.g. R56, 78. Attachments on cases and plans are then refused (they belong to no run). Empty: any run.",
+      "required": false
+    },
+    "toolsets": {
+      "type": "string",
+      "title": "Tool groups",
+      "description": "Optional: extra tool groups to offer Claude, comma-separated: attachments, history, fields, milestones, users (or core for none). Empty: all. Fewer tools leave more of each conversation for your work.",
       "required": false
     }
   }

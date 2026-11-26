@@ -22,8 +22,8 @@ With `TESTRAIL_ALLOWED_PROJECT_IDS` and/or `TESTRAIL_ALLOWED_RUN_IDS` set, pestr
 every write target to its run and project using read calls before writing. When both are
 set, a write must satisfy both.
 
-- **Case and plan attachments** aren't tied to a run. With only a run allowlist they're
-  refused; add a project allowlist to allow them.
+- **Case and plan attachments** aren't tied to a run, so they're refused whenever a run
+  allowlist is set. To allow them, use only a project allowlist.
 - **`add_attachment_to_result`:** TestRail has no API to look up a single result.
   - Results created by pestrail in the current session are known automatically.
   - For any other result, pass its `test_id`. pestrail checks the result belongs to that

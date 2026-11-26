@@ -19,6 +19,7 @@ All settings are environment variables, normally set in your MCP client's `env` 
 | `TESTRAIL_CA_BUNDLE` | no | PEM file with CA certificates to trust (see [Corporate networks](#corporate-networks-proxies-and-tls)). |
 | `TESTRAIL_ALLOW_HTTP` | no | `true` allows plain `http://` for a non-local host. **Your API key is then sent unencrypted.** |
 | `PESTRAIL_MAX_OUTPUT_CHARS` | no | Size budget for one tool response, in characters. Default `40000` (about 10–13k tokens), range `5000`–`1000000`. Larger list pages are cut and continue via `paging.next_offset`; in a single case or test that is still too large, the longest text fields are cut. Raise it only if your MCP client accepts larger tool results. |
+| `PESTRAIL_TOOLSETS` | no | Tool groups to offer besides the core tools (projects, suites, sections, cases, runs, plans, tests, results, statuses), comma-separated: `attachments`, `history`, `fields` (case/result fields, priorities, case types, templates, configs), `milestones`, `users`. `core` = core tools only. Default: all. Every tool description is sent in every conversation: `core` saves about 29% (read-only) to 36% (write mode). Hiding a group never changes what the other tools may do. |
 | `PESTRAIL_LOG_LEVEL` | no | `DEBUG`, `INFO`, `WARNING` (default) or `ERROR`. Logs go to stderr only. |
 | `PESTRAIL_ENV_FILE` | no | Path to a `.env` file to load, or `none` to disable `.env` loading. |
 

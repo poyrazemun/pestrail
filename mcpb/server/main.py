@@ -27,6 +27,9 @@ NO_FOLDERS_MESSAGE = (
     "Claude Desktop open Settings > Extensions > pestrail and either add at least one "
     "Attachment folder or turn Read-only back on, then Save."
 )
+#: Form field titles (manifest.json), used in messages instead of environment variable names.
+PROJECTS, RUNS, TOOL_GROUPS = "Allowed projects", "Allowed runs", "Tool groups"
+FIX_IT = "In Claude Desktop open Settings > Extensions > pestrail, correct it, then Save."
 
 
 def _is_set(value: str) -> bool:
@@ -53,6 +56,24 @@ def setup_problem(env: MutableMapping[str, str]) -> str | None:
     any_path = env.get("TESTRAIL_ALLOW_ANY_ATTACHMENT_PATH", "").strip().lower() in _ON
     if write_mode and not env.get("TESTRAIL_ATTACHMENT_ROOTS") and not any_path:
         return NO_FOLDERS_MESSAGE
+    return invalid_setting(env)
+
+
+def invalid_setting(env: MutableMapping[str, str]) -> str | None:
+    """Check the free-text settings with pestrail's own rules, naming the form field."""
+    from pestrail.config import ConfigError, parse_allowed_ids, parse_toolsets
+
+    checks = (
+        ("TESTRAIL_ALLOWED_PROJECT_IDS", lambda v: parse_allowed_ids(v, "project", PROJECTS)),
+        ("TESTRAIL_ALLOWED_RUN_IDS", lambda v: parse_allowed_ids(v, "run", RUNS)),
+        ("PESTRAIL_TOOLSETS", lambda v: parse_toolsets(v, TOOL_GROUPS)),
+    )
+    for name, check in checks:
+        if name in env:
+            try:
+                check(env[name])
+            except ConfigError as exc:
+                return f"pestrail extension: {exc} {FIX_IT}"
     return None
 
 

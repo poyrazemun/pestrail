@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from .toolsets import ALL, CORE, TOOLSETS
+
 DEFAULT_TIMEOUT = 30.0
 DEFAULT_UPLOAD_TIMEOUT = 300.0
 MAX_TIMEOUT = 600.0
@@ -81,6 +83,8 @@ class Config:
     #: Size budget (characters) for one list tool response; larger pages are cut and
     #: continue via paging.next_offset, so MCP clients never reject the result as too big.
     max_output_chars: int = DEFAULT_MAX_OUTPUT_CHARS
+    #: Optional tool groups to register (see toolsets.py); core tools are always registered.
+    toolsets: frozenset[str] = frozenset(TOOLSETS)
 
 
 def _is_loopback(host: str | None) -> bool:
@@ -222,6 +226,24 @@ def parse_allowed_ids(raw: str | None, kind: str, name: str) -> frozenset[int]:
     return frozenset(values or [])
 
 
+def parse_toolsets(raw: str | None, name: str = "PESTRAIL_TOOLSETS") -> frozenset[str]:
+    """PESTRAIL_TOOLSETS: comma-separated optional groups; unset/empty/'all' = all groups.
+
+    'core' alone means no optional group. ``name`` is the setting named in errors.
+    """
+    if raw is None or not raw.strip():
+        return frozenset(TOOLSETS)
+    names = {part.strip().lower() for part in raw.split(",") if part.strip()}
+    if ALL in names:
+        return frozenset(TOOLSETS)
+    unknown = sorted(names - set(TOOLSETS) - {CORE})
+    if unknown:
+        valid = ", ".join([CORE, *TOOLSETS, ALL])
+        shown = ", ".join(repr(group[:40]) for group in unknown[:5])
+        raise ConfigError(f"{name}: unknown group(s) {shown}. Valid groups: {valid}.")
+    return frozenset(names - {CORE})
+
+
 def user_config_dir(environ: Mapping[str, str] | None = None, *, os_name: str = os.name) -> Path:
     """Per-user config directory: %APPDATA%\\pestrail on Windows, else
     $XDG_CONFIG_HOME/pestrail or ~/.config/pestrail."""
@@ -329,6 +351,7 @@ def load_config(env: Mapping[str, str] | None = None) -> Config:
         timeout=parse_timeout(env.get("TESTRAIL_TIMEOUT"), max_value=MAX_TIMEOUT),
         ca_bundle=parse_ca_bundle(env.get("TESTRAIL_CA_BUNDLE")),
         max_output_chars=parse_max_output_chars(env.get("PESTRAIL_MAX_OUTPUT_CHARS")),
+        toolsets=parse_toolsets(env.get("PESTRAIL_TOOLSETS")),
         upload_timeout=parse_timeout(
             env.get("TESTRAIL_UPLOAD_TIMEOUT"),
             "TESTRAIL_UPLOAD_TIMEOUT",
