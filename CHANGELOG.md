@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.1.0 (2026-11-26)
+
+A one-call run overview, fewer tools when you don't need them all, and write limits in the
+Claude Desktop extension.
+
+### Added
+
+- `get_run_summary`: a run's test counts per status and per assignee, plus its failed and
+  blocked tests (or the statuses you choose), in one call instead of paging `get_tests`.
+- `PESTRAIL_TOOLSETS` (extension setting "Tool groups"): offer only some tool groups
+  (attachments, history, fields, milestones, users). The core tools are always there.
+  Every tool description is sent in every conversation; `core` alone makes them about a
+  third smaller. Default: all tools, as before.
+- Claude Desktop extension: optional "Allowed projects" and "Allowed runs" settings limit
+  where Claude can add results and attachments. Invalid values are explained in the
+  form's terms.
+
+### Fixed
+
+- The docs and an error message wrongly said that a project allowlist allows case and plan
+  attachments while a run allowlist is set. Such attachments are always refused then (they
+  belong to no run); only the wording changed.
+
+### Changed
+
+- Dependencies: pydantic 2.14.4 in the lock file used by CI.
+
 ## 1.0.0 (2026-11-25)
 
 First stable release: read a case's change history, look up case types and templates, and
